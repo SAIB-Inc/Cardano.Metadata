@@ -1,7 +1,6 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace TeddySwapCardanoMetadataService.Models;
+namespace Cardano.Metadata.Models;
 
 public record GitCommitFile
 {

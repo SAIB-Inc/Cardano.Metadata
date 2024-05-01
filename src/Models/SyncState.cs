@@ -1,4 +1,4 @@
-namespace TeddySwapCardanoMetadataService.Models;
+namespace Cardano.Metadata.Models;
 
 public record SyncState
 {
