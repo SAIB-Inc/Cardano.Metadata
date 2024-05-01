@@ -1,11 +1,11 @@
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text.Json;
+using Cardano.Metadata.Data;
+using Cardano.Metadata.Models;
 using Microsoft.EntityFrameworkCore;
-using TeddySwapCardanoMetadataService.Data;
-using TeddySwapCardanoMetadataService.Models;
 
-namespace TeddySwapCardanoMetadataService.Workers;
+namespace Cardano.Metadata.Workers;
 
 public class GithubWorker : BackgroundService
 {
@@ -34,11 +34,11 @@ public class GithubWorker : BackgroundService
 
             using TokenMetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(stoppingToken);
 
-            SyncState? syncState = await dbContext.SyncState.OrderByDescending(ss => ss.Date).FirstOrDefaultAsync();
+            SyncState? syncState = await dbContext.SyncState.OrderByDescending(ss => ss.Date).FirstOrDefaultAsync(cancellationToken: stoppingToken);
 
             HttpClient hc = _httpClientFactory.CreateClient("Github");
-            ProductInfoHeaderValue productValue = new ProductInfoHeaderValue("CardanoTokenMetadataService", Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "Unknown Version");
-            ProductInfoHeaderValue commentValue = new ProductInfoHeaderValue("(+https://github.com/teddy-swap/cardano-metadata-service)");
+            ProductInfoHeaderValue productValue = new("CardanoTokenMetadataService", Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "Unknown Version");
+            ProductInfoHeaderValue commentValue = new("(+https://github.com/SAIB-Inc/Cardano.Metadata)");
             hc.DefaultRequestHeaders.UserAgent.Add(productValue);
             hc.DefaultRequestHeaders.UserAgent.Add(commentValue);
             hc.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _config["GithubPAT"]);
@@ -54,7 +54,7 @@ public class GithubWorker : BackgroundService
                         stoppingToken
                     );
 
-                if (latestCommits is not null && latestCommits.Count() > 0)
+                if (latestCommits is not null && latestCommits.Any())
                 {
                     GitCommit latestCommit = latestCommits.First();
                     GitTreeResponse? treeResponse = await hc
@@ -74,13 +74,13 @@ public class GithubWorker : BackgroundService
                                     .Replace(".json", string.Empty);
 
                                 JsonElement mappingJson =
-                                    await hc.GetFromJsonAsync<JsonElement>($"https://raw.githubusercontent.com/{_config["RegistryOwner"]}/{_config["RegistryRepo"]}/{latestCommit.Sha}/{item.Path}");
+                                    await hc.GetFromJsonAsync<JsonElement>($"https://raw.githubusercontent.com/{_config["RegistryOwner"]}/{_config["RegistryRepo"]}/{latestCommit.Sha}/{item.Path}", cancellationToken: stoppingToken);
 
                                 await dbContext.TokenMetadata.AddAsync(new()
                                 {
                                     Subject = subject,
                                     Data = mappingJson
-                                });
+                                }, stoppingToken);
                             }
                         }
 
@@ -89,9 +89,9 @@ public class GithubWorker : BackgroundService
                             // @TODO handle null from API???
                             Sha = latestCommit.Sha ?? string.Empty,
                             Date = latestCommit.Commit?.Author?.Date ?? DateTime.UtcNow
-                        });
+                        }, stoppingToken);
 
-                        await dbContext.SaveChangesAsync();
+                        await dbContext.SaveChangesAsync(stoppingToken);
                     }
                     else
                     {
@@ -108,22 +108,21 @@ public class GithubWorker : BackgroundService
             else
             {
                 _logger.LogInformation("Repo: {repo} Owner: {owner} checking for changes...", _config["RegistryOwner"], _config["RegistryRepo"]);
-                List<GitCommit> latestCommitsSince = new();
+                List<GitCommit> latestCommitsSince = [];
 
                 int page = 1;
                 while (true)
                 {
-                    IEnumerable<GitCommit>? commitPage = await hc.GetFromJsonAsync<IEnumerable<GitCommit>>(
-                        $"https://api.github.com/repos/{_config["RegistryOwner"]}/{_config["RegistryRepo"]}/commits?since={syncState.Date.AddSeconds(1).ToString("yyyy-MM-dd'T'HH:mm:ssZ")}&page={page}"
-                    );
-                    if (commitPage is null || commitPage.Count() <= 0) break;
+                    IEnumerable<GitCommit>? commitPage = await hc.GetFromJsonAsync<IEnumerable<GitCommit>>($"https://api.github.com/repos/{_config["RegistryOwner"]}/{_config["RegistryRepo"]}/commits?since={syncState.Date.AddSeconds(1).ToString("yyyy-MM-dd'T'HH:mm:ssZ")}&page={page}"
+, cancellationToken: stoppingToken);
+                    if (commitPage is null || !commitPage.Any()) break;
                     latestCommitsSince.AddRange(commitPage);
                     page++;
                 }
 
                 foreach (GitCommit commit in latestCommitsSince)
                 {
-                    GitCommit? resolvedCommit = await hc.GetFromJsonAsync<GitCommit>(commit.Url);
+                    GitCommit? resolvedCommit = await hc.GetFromJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
                     if (resolvedCommit is not null && resolvedCommit.Files is not null)
                     {
                         foreach (GitCommitFile file in resolvedCommit.Files)
@@ -139,8 +138,8 @@ public class GithubWorker : BackgroundService
                                 {
 
                                     JsonElement mappingJson =
-                                        await hc.GetFromJsonAsync<JsonElement>(rawUrl);
-                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.ToLower() == subject.ToLower()).FirstOrDefaultAsync();
+                                        await hc.GetFromJsonAsync<JsonElement>(rawUrl, cancellationToken: stoppingToken);
+                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.Equals(subject, StringComparison.CurrentCultureIgnoreCase)).FirstOrDefaultAsync(cancellationToken: stoppingToken);
 
                                     if (existingMetadata is not null)
                                     {
@@ -152,20 +151,20 @@ public class GithubWorker : BackgroundService
                                         {
                                             Subject = subject,
                                             Data = mappingJson
-                                        });
+                                        }, stoppingToken);
                                     }
                                     _logger.LogInformation("Repo: {repo} Owner: {owner} Subject: {subject} added/updated...", _config["RegistryOwner"], _config["RegistryRepo"], subject);
                                 }
                                 catch
                                 {
                                     _logger.LogInformation("Repo: {repo} Owner: {owner} File: {file} not found, deleting metadata...", _config["RegistryOwner"], _config["RegistryRepo"], rawUrl);
-                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.ToLower() == subject.ToLower()).FirstOrDefaultAsync();
+                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.Equals(subject, StringComparison.CurrentCultureIgnoreCase)).FirstOrDefaultAsync(cancellationToken: stoppingToken);
                                     if (existingMetadata is not null)
                                     {
                                         dbContext.TokenMetadata.Remove(existingMetadata);
                                     }
                                 }
-                                await dbContext.SaveChangesAsync();
+                                await dbContext.SaveChangesAsync(stoppingToken);
                             }
                         }
                     }
@@ -175,9 +174,9 @@ public class GithubWorker : BackgroundService
                         // @TODO handle null from API???
                         Sha = commit.Sha ?? string.Empty,
                         Date = commit.Commit?.Author?.Date ?? DateTime.UtcNow
-                    });
+                    }, stoppingToken);
 
-                    await dbContext.SaveChangesAsync();
+                    await dbContext.SaveChangesAsync(stoppingToken);
                 }
             }
 

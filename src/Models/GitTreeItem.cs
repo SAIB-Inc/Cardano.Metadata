@@ -1,6 +1,4 @@
-using System.Text.Json;
-
-namespace TeddySwapCardanoMetadataService.Models;
+namespace Cardano.Metadata.Models;
 
 public record GitTreeItem
 {

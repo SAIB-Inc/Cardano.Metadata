@@ -1,19 +1,17 @@
 using Microsoft.EntityFrameworkCore;
-using TeddySwapCardanoMetadataService.Data;
-using TeddySwapCardanoMetadataService.Workers;
+using Cardano.Metadata.Data;
+using Cardano.Metadata.Workers;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
-
+var allowedOrigins = JsonSerializer.Deserialize<string[]>(builder.Configuration.GetValue<string>("AllowedOrigins") ?? "[]");
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(name: "Main",
         policy =>
         {
             policy
-                .WithOrigins(
-                    "https://preview.app.teddyswap.org",
-                    "http://localhost:3000"
-                )
+                .WithOrigins(allowedOrigins ?? [])
                 .AllowAnyHeader()
                 .AllowAnyMethod();
         });
@@ -35,14 +33,16 @@ builder.Services.AddHttpClient();
 
 var app = builder.Build();
 
+using var scope = app.Services.CreateScope();
+var dbContext = scope.ServiceProvider.GetRequiredService<TokenMetadataDbContext>();
+dbContext.Database.Migrate();
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-
-app.UseHttpsRedirection();
 
 app.UseAuthorization();
 

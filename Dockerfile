@@ -9,4 +9,4 @@ FROM mcr.microsoft.com/dotnet/aspnet:7.0
 WORKDIR /app
 COPY --from=builder /build/bin .
 EXPOSE 3337
-ENTRYPOINT ["dotnet", "TeddySwapCardanoMetadataService.dll"]
+ENTRYPOINT ["dotnet", "Cardano.Metadata.dll"]

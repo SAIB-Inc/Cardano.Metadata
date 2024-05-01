@@ -1,11 +1,9 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Internal;
-using TeddySwapCardanoMetadataService.Data;
-using TeddySwapCardanoMetadataService.Models;
+using Cardano.Metadata.Models;
+using Cardano.Metadata.Data;
 
-namespace TeddySwapCardanoMetadataService.Controllers;
+namespace Cardano.Metadata.Controllers;
 
 [ApiController]
 [Route("metadata")]

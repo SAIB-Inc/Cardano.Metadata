@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using TeddySwapCardanoMetadataService.Models;
+using Cardano.Metadata.Models;
 
-namespace TeddySwapCardanoMetadataService.Data;
+namespace Cardano.Metadata.Data;
 
 public class TokenMetadataDbContext : DbContext
 {
