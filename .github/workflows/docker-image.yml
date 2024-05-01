@@ -27,6 +27,6 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           push: true
-          tags: clarkteddyswap/teddy-token-registry:${{ github.sha }}
+          tags: rawriclark/cardano-token-registry:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
