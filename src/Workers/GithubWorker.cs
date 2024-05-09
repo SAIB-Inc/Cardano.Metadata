@@ -139,7 +139,7 @@ public class GithubWorker : BackgroundService
 
                                     JsonElement mappingJson =
                                         await hc.GetFromJsonAsync<JsonElement>(rawUrl, cancellationToken: stoppingToken);
-                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.ToLowerInvariant() == subject.ToLowerInvariant()).FirstOrDefaultAsync(cancellationToken: stoppingToken);
+                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.ToLower() == subject.ToLower()).FirstOrDefaultAsync(cancellationToken: stoppingToken);
 
                                     if (existingMetadata is not null)
                                     {
@@ -158,7 +158,7 @@ public class GithubWorker : BackgroundService
                                 catch
                                 {
                                     _logger.LogInformation("Repo: {repo} Owner: {owner} File: {file} not found, deleting metadata...", _config["RegistryOwner"], _config["RegistryRepo"], rawUrl);
-                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.ToLowerInvariant() == subject.ToLowerInvariant()).FirstOrDefaultAsync(cancellationToken: stoppingToken);
+                                    TokenMetadata? existingMetadata = await dbContext.TokenMetadata.Where(tm => tm.Subject.ToLower() == subject.ToLower()).FirstOrDefaultAsync(cancellationToken: stoppingToken);
                                     if (existingMetadata is not null)
                                     {
                                         dbContext.TokenMetadata.Remove(existingMetadata);
