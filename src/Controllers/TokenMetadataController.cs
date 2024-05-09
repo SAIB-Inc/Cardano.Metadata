@@ -37,9 +37,10 @@ public class TokenMetadataController : ControllerBase
 
     [HttpPost]
     public async Task<IActionResult> GetSubjects(
+        [FromBody] List<string>? subjects,
         [FromQuery] int? limit,
         [FromQuery] string? searchKey,
-        [FromBody] List<string>? subjects,
+        [FromQuery] string? policyId,
         [FromQuery] int offset = 0
     )
     {
@@ -57,6 +58,12 @@ public class TokenMetadataController : ControllerBase
         if (!string.IsNullOrWhiteSpace(searchKey))
         {
             query = query.Where(tmd => tmd.Subject.Contains(searchKey.ToLower()));
+        }
+
+        // Filter by policy id
+        if (!string.IsNullOrWhiteSpace(policyId))
+        {
+            query = query.Where(tmd => tmd.Subject.Substring(0, 56).ToLower() == policyId.ToLower());
         }
 
         // Get total count before pagination
