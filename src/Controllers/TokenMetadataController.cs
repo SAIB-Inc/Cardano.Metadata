@@ -33,4 +33,13 @@ public class TokenMetadataController : ControllerBase
             return NotFound();
         }
     }
+
+    [HttpPost]
+    public async Task<IActionResult> GetSubjects(List<string> subjects)
+    {
+        using TokenMetadataDbContext db = await _dbFactory.CreateDbContextAsync();
+        subjects = subjects.Select(s => s.ToLower()).ToList();
+        List<TokenMetadata> metadataEntries = await db.TokenMetadata.Where(tmd => subjects.Contains(tmd.Subject.ToLower())).ToListAsync();
+        return Ok(metadataEntries);
+    }
 }
