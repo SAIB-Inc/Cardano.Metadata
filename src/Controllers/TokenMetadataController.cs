@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Cardano.Metadata.Models;
 using Cardano.Metadata.Data;
 using System.Text;
+using System.Text.Json;
 
 namespace Cardano.Metadata.Controllers;
 
@@ -42,7 +43,9 @@ public class TokenMetadataController : ControllerBase
         [FromQuery] string? searchKey,
         [FromQuery] string? policyId,
         [FromQuery] int offset = 0,
-        [FromQuery] bool filterEmptyName = false
+        [FromQuery] bool includeEmptyName = false,
+        [FromQuery] bool includeEmptyLogo = false,
+        [FromQuery] bool includeEmptyTicker = false
     )
     {
         using TokenMetadataDbContext db = await _dbFactory.CreateDbContextAsync();
@@ -68,9 +71,19 @@ public class TokenMetadataController : ControllerBase
         }
 
         // Filter by empty name
-        if (filterEmptyName)
+        if (!includeEmptyName)
         {
-            query = query.Where(tmd => tmd.Subject.Length > 56);
+            query = query.Where(tmd => !string.IsNullOrWhiteSpace(tmd.Data.GetProperty("name").GetProperty("value").GetString()));
+        }
+
+        if (!includeEmptyLogo)
+        {
+            query = query.Where(tmd => !string.IsNullOrWhiteSpace(tmd.Data.GetProperty("logo").GetProperty("value").GetString()));
+        }
+
+        if (!includeEmptyTicker)
+        {
+            query = query.Where(tmd => !string.IsNullOrWhiteSpace(tmd.Data.GetProperty("ticker").GetProperty("value").GetString()));
         }
 
         // Get total count before pagination
