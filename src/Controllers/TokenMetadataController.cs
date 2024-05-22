@@ -41,7 +41,8 @@ public class TokenMetadataController : ControllerBase
         [FromQuery] int? limit,
         [FromQuery] string? searchKey,
         [FromQuery] string? policyId,
-        [FromQuery] int offset = 0
+        [FromQuery] int offset = 0,
+        [FromQuery] bool filterEmptyName = false
     )
     {
         using TokenMetadataDbContext db = await _dbFactory.CreateDbContextAsync();
@@ -64,6 +65,12 @@ public class TokenMetadataController : ControllerBase
         if (!string.IsNullOrWhiteSpace(policyId))
         {
             query = query.Where(tmd => tmd.Subject.Substring(0, 56).ToLower() == policyId.ToLower());
+        }
+
+        // Filter by empty name
+        if (filterEmptyName)
+        {
+            query = query.Where(tmd => tmd.Subject.Length > 56);
         }
 
         // Get total count before pagination
