@@ -61,7 +61,10 @@ public class TokenMetadataController : ControllerBase
         // Filter by search key
         if (!string.IsNullOrWhiteSpace(searchKey))
         {
-            query = query.Where(tmd => tmd.Data.GetProperty("name").GetProperty("value").GetString()!.ToLower().Contains(searchKey.ToLower()));
+            query = query.Where(tmd => 
+                tmd.Data.GetProperty("name").GetProperty("value").GetString()!.ToLower().Contains(searchKey.ToLower()) || 
+                tmd.Data.GetProperty("ticker").GetProperty("value").GetString()!.ToLower().Contains(searchKey.ToLower())
+            );
         }
 
         // Filter by policy id
