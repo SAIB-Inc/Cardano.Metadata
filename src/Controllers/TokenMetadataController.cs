@@ -54,20 +54,21 @@ public class TokenMetadataController : ControllerBase
         // Filter by subjects
         if (subjects is not null)
         {
-            subjects = subjects.Select(s => s.ToLower()).ToList();
-            query = query.Where(tmd => subjects.Contains(tmd.Subject.ToLower()));
+            subjects = subjects.Select(s => s.ToLowerInvariant()).ToList();
+            query = query.Where(tmd => subjects.Contains(tmd.Subject.ToLowerInvariant()));
         }
 
         // Filter by search key
         if (!string.IsNullOrWhiteSpace(searchKey))
         {
-            query = query.Where(tmd => tmd.Subject.Contains(searchKey.ToLower()));
+            string searchKeyHex = Convert.ToHexString(Encoding.UTF8.GetBytes(searchKey)).ToLowerInvariant();
+            query = query.Where(tmd => tmd.Subject.Contains(searchKeyHex));
         }
 
         // Filter by policy id
         if (!string.IsNullOrWhiteSpace(policyId))
         {
-            query = query.Where(tmd => tmd.Subject.Substring(0, 56).ToLower() == policyId.ToLower());
+            query = query.Where(tmd => tmd.Subject.Substring(0, 56).ToLowerInvariant() == policyId.ToLowerInvariant());
         }
 
         // Filter by empty name
