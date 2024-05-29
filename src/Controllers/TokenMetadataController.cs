@@ -4,6 +4,7 @@ using Cardano.Metadata.Models;
 using Cardano.Metadata.Data;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.OutputCaching;
 
 namespace Cardano.Metadata.Controllers;
 
@@ -21,6 +22,7 @@ public class TokenMetadataController : ControllerBase
         _dbFactory = dbFactory;
     }
 
+    [OutputCache]
     [HttpGet("{subject}")]
     public async Task<IActionResult> Get(string subject)
     {
@@ -36,6 +38,7 @@ public class TokenMetadataController : ControllerBase
         }
     }
 
+    [OutputCache(PolicyName = "CachePost")]
     [HttpPost]
     public async Task<IActionResult> GetSubjects(
         [FromBody] List<string>? subjects,
@@ -61,8 +64,8 @@ public class TokenMetadataController : ControllerBase
         // Filter by search key
         if (!string.IsNullOrWhiteSpace(searchKey))
         {
-            query = query.Where(tmd => 
-                tmd.Data.GetProperty("name").GetProperty("value").GetString()!.ToLower().Contains(searchKey.ToLower()) || 
+            query = query.Where(tmd =>
+                tmd.Data.GetProperty("name").GetProperty("value").GetString()!.ToLower().Contains(searchKey.ToLower()) ||
                 tmd.Data.GetProperty("ticker").GetProperty("value").GetString()!.ToLower().Contains(searchKey.ToLower())
             );
         }
@@ -93,7 +96,7 @@ public class TokenMetadataController : ControllerBase
         int total = await query.CountAsync();
 
         // Sort
-        query = query.OrderBy(tmd => tmd.Subject.Substring(56));
+        query = query.OrderBy(tmd => tmd.Data.GetProperty("ticker").GetProperty("value").GetString()!.ToLower());
 
         // Skip offset
         query = query.Skip(offset);
