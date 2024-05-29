@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Cardano.Metadata.Data;
 using Cardano.Metadata.Workers;
 using System.Text.Json;
+using Cardano.Metadata.Policies;
 
 var builder = WebApplication.CreateBuilder(args);
 var allowedOrigins = JsonSerializer.Deserialize<string[]>(builder.Configuration.GetValue<string>("AllowedOrigins") ?? "[]");
@@ -24,6 +25,19 @@ builder.Services.AddDbContextFactory<TokenMetadataDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("TokenMetadataService"));
 });
 
+// Caching
+builder.Services.AddStackExchangeRedisOutputCache(options =>
+{
+    options.Configuration = builder.Configuration.GetConnectionString("Redis");
+});
+
+builder.Services.AddOutputCache(options =>
+{
+    options.AddBasePolicy(builder =>
+        builder.Expire(TimeSpan.FromHours(24)));
+    options.AddPolicy("CachePost", PostRequestCachingPolicy.Instance);
+});
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -38,14 +52,14 @@ var dbContext = scope.ServiceProvider.GetRequiredService<TokenMetadataDbContext>
 dbContext.Database.Migrate();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+
+app.UseSwagger();
+app.UseSwaggerUI();
+
 
 app.UseAuthorization();
 
 app.MapControllers();
 app.UseCors("Main");
+app.UseOutputCache();
 app.Run();
