@@ -26,10 +26,14 @@ builder.Services.AddDbContextFactory<TokenMetadataDbContext>(options =>
 });
 
 // Caching
-builder.Services.AddStackExchangeRedisOutputCache(options =>
+string? cacheMode = builder.Configuration["CacheMode"];
+if (!string.IsNullOrEmpty(cacheMode) && cacheMode.Equals("redis", StringComparison.CurrentCultureIgnoreCase))
 {
-    options.Configuration = builder.Configuration.GetConnectionString("Redis");
-});
+    builder.Services.AddStackExchangeRedisOutputCache(options =>
+    {
+        options.Configuration = builder.Configuration.GetConnectionString("Redis");
+    });
+}
 
 builder.Services.AddOutputCache(options =>
 {
