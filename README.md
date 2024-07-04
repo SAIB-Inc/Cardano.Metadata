@@ -52,7 +52,7 @@ dotnet --version
 Download the source code:
 
 ```bash
-git clone https://github.com/teddy-swap/cardano-metadata-service.git
+git clone https://github.com/SAIB-Inc/Cardano.Metadata.git
 cd cardano-metadata-service/src
 ```
 
@@ -99,7 +99,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:7.0
 WORKDIR /app
 COPY --from=builder /build/bin .
 EXPOSE 1337
-ENTRYPOINT ["dotnet", "TeddySwapCardanoMetadataService.dll"]
+ENTRYPOINT ["dotnet", "CardanoMetadataService.dll"]
 ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
