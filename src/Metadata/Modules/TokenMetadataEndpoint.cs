@@ -58,6 +58,24 @@ public class TokenMetadataEndpoint : CarterModule
             return Results.Created($"/cardano-token/{token.Subject}", token);
         });
 
+        // Batch POST to add multiple tokens
+        app.MapPost("/cardano-token/batch", async (TokenMetadataDbContext db, List<TokenMetadata> tokens) =>
+        {
+            var existingSubjects = await db.TokenMetadata
+                .Where(t => tokens.Select(x => x.Subject).Contains(t.Subject))
+                .ToListAsync();
+
+            if (existingSubjects.Any())
+            {
+                var existingSubjectsList = existingSubjects.Select(x => x.Subject).ToList();
+                return Results.Conflict($"The following tokens already exist: {string.Join(", ", existingSubjectsList)}");
+            }
+
+            await db.TokenMetadata.AddRangeAsync(tokens);
+            await db.SaveChangesAsync();
+            return Results.Created("/cardano-token/batch", tokens);
+        });
+
         // PUT update an existing token
         app.MapPut("/cardano-token/{subject}", async (TokenMetadataDbContext db, string subject, TokenMetadata tokenInput) =>
         {

@@ -4,31 +4,25 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Optional: Ensure all dependencies are copied locally -->
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Exclude analyzers so they don't load during design-time EF operations -->
-    <PackageReference Include="Carter" Version="9.0.0">
-      <ExcludeAssets>analyzers</ExcludeAssets>
-    </PackageReference>
-    <PackageReference Include="Carter.Analyzers" Version="9.0.0">
-      <ExcludeAssets>all</ExcludeAssets>
-    </PackageReference>
+    <PackageReference Include="Carter" Version="9.0.0" />
+    <PackageReference Include="GraphQL.Server.Ui.Playground" Version="8.2.0" />
+    <PackageReference Include="HotChocolate.AspNetCore" Version="12.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.1" />
-    <!-- EF Core packages -->
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.11.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.11.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="4.11.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.2">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.2" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.0.22" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="7.3.1" />
-    <!-- Use Roslyn packages that match Carter's expectations -->
-    <PackageReference Include="Microsoft.CodeAnalysis.Common" Version="4.11.0" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
-    <!-- Remove any references to Microsoft.CodeAnalysis.Workspaces or Microsoft.CodeAnalysis.CSharp.Workspaces -->
   </ItemGroup>
 
 </Project>
