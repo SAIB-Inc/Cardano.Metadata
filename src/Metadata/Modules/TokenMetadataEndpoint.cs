@@ -10,19 +10,9 @@ public class TokenMetadataEndpoint : CarterModule
 {
     public override void AddRoutes(IEndpointRouteBuilder app)
     {
-        // GET all tokens
-        app.MapGet("/cardano-token", async (TokenMetadataDbContext db) =>
-        {
-            var tokens = await db.TokenMetadata.ToListAsync();
-            if (!tokens.Any())
-                return Results.NotFound("No token metadata found.");
-
-            var result = tokens.Select(t => JsonSerializer.Deserialize<JsonElement>(t.Data));
-            return Results.Ok(result);
-        });
 
         // GET a specific token by subject
-        app.MapGet("/cardano-token/{subject}", async (TokenMetadataDbContext db, string subject) =>
+        app.MapGet("/metadata/{subject}", async (TokenMetadataDbContext db, string subject) =>
         {
             var token = await db.TokenMetadata.FindAsync(subject);
             if (token is null)
@@ -33,7 +23,7 @@ public class TokenMetadataEndpoint : CarterModule
         });
 
         // POST a new token
-        app.MapPost("/cardano-token", async (TokenMetadataDbContext db, TokenMetadata tokenInput) =>
+        app.MapPost("/metadata", async (TokenMetadataDbContext db, TokenMetadata tokenInput) =>
         {
             var existingToken = await db.TokenMetadata.FindAsync(tokenInput.Subject);
             if (existingToken is not null)
@@ -56,59 +46,6 @@ public class TokenMetadataEndpoint : CarterModule
             await db.SaveChangesAsync();
 
             return Results.Created($"/cardano-token/{token.Subject}", token);
-        });
-
-        // Batch POST to add multiple tokens
-        app.MapPost("/cardano-token/batch", async (TokenMetadataDbContext db, List<TokenMetadata> tokens) =>
-        {
-            var existingSubjects = await db.TokenMetadata
-                .Where(t => tokens.Select(x => x.Subject).Contains(t.Subject))
-                .ToListAsync();
-
-            if (existingSubjects.Any())
-            {
-                var existingSubjectsList = existingSubjects.Select(x => x.Subject).ToList();
-                return Results.Conflict($"The following tokens already exist: {string.Join(", ", existingSubjectsList)}");
-            }
-
-            await db.TokenMetadata.AddRangeAsync(tokens);
-            await db.SaveChangesAsync();
-            return Results.Created("/cardano-token/batch", tokens);
-        });
-
-        // PUT update an existing token
-        app.MapPut("/cardano-token/{subject}", async (TokenMetadataDbContext db, string subject, TokenMetadata tokenInput) =>
-        {
-            var token = await db.TokenMetadata.FindAsync(subject);
-            if (token is null)
-                return Results.NotFound();
-
-            var newToken = new TokenMetadata
-            {
-                Name = tokenInput.Name,
-                Description = tokenInput.Description,
-                Policy = tokenInput.Policy,
-                Ticker = tokenInput.Ticker,
-                Url = tokenInput.Url,
-                Logo = tokenInput.Logo,
-                Decimals = tokenInput.Decimals,
-                Data = tokenInput.Data
-            };
-
-            await db.SaveChangesAsync();
-            return Results.Ok(token);
-        });
-
-        // DELETE a token
-        app.MapDelete("/cardano-token/{subject}", async (TokenMetadataDbContext db, string subject) =>
-        {
-            var token = await db.TokenMetadata.FindAsync(subject);
-            if (token is null)
-                return Results.NotFound();
-
-            db.TokenMetadata.Remove(token);
-            await db.SaveChangesAsync();
-            return Results.NoContent();
         });
     }
 }

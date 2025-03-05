@@ -11,8 +11,8 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCarter();
 
 // Enable OpenAPI generation
-builder.Services.AddEndpointsApiExplorer();  // Required for OpenAPI in .NET 8+
-builder.Services.AddSwaggerGen();  // Optional, if using Swagger for OpenAPI spec
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(); 
 
 // Set up the database context (as per your original setup)
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -24,22 +24,22 @@ var app = builder.Build();
 // Configure the HTTP request pipeline for Scalar Playground and API Reference
 if (app.Environment.IsDevelopment())
 {
-    // Expose the OpenAPI specification, if needed (this is based on .NET 8+ setup)
+
     app.UseSwagger(options =>
     {
-        options.RouteTemplate = "/openapi/{documentName}.json";  // Customize the route template
+        options.RouteTemplate = "/openapi/{documentName}.json"; 
     });
 
     // Map Scalar API Reference with custom options
     app.MapScalarApiReference(options =>
     {
-        options.WithTitle("Custom API Playground")  // Title of your API playground
-               .WithSidebar(true)  // Optionally hide the sidebar
-               .WithOpenApiRoutePattern("/openapi/{documentName}.json");  // Path to your OpenAPI spec
+        options.WithTitle("Custom API Playground") 
+               .WithSidebar(true) 
+               .WithOpenApiRoutePattern("/openapi/{documentName}.json"); 
     });
 }
 
 app.UseHttpsRedirection();
-app.MapCarter();  // Map your Carter endpoints
+app.MapCarter();
 
 app.Run();
