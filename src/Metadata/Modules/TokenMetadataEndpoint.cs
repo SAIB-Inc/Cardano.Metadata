@@ -22,30 +22,21 @@ public class TokenMetadataEndpoint : CarterModule
             return Results.Ok(result);
         });
 
-        // POST a new token
-        app.MapPost("/metadata", async (TokenMetadataDbContext db, TokenMetadata tokenInput) =>
+        app.MapPost("/metadata", async (TokenMetadataDbContext db, List<string> subjects) =>
         {
-            var existingToken = await db.TokenMetadata.FindAsync(tokenInput.Subject);
-            if (existingToken is not null)
-                return Results.Conflict($"A token with subject '{tokenInput.Subject}' already exists.");
+            if (subjects == null || subjects.Count == 0)
+                return Results.BadRequest("No subjects provided.");
 
-            var token = new TokenMetadata
-            {
-                Subject = tokenInput.Subject,
-                Name = tokenInput.Name,
-                Description = tokenInput.Description,
-                Policy = tokenInput.Policy,
-                Ticker = tokenInput.Ticker,
-                Url = tokenInput.Url,
-                Logo = tokenInput.Logo,
-                Decimals = tokenInput.Decimals,
-                Data = tokenInput.Data
-            };
+            var lowerSubjects = subjects.Select(s => s.ToLowerInvariant()).ToList();
 
-            await db.TokenMetadata.AddAsync(token);
-            await db.SaveChangesAsync();
+            var tokens = await db.TokenMetadata
+                .Where(t => lowerSubjects.Contains(t.Subject.ToLower()))
+                .ToListAsync();
 
-            return Results.Created($"/cardano-token/{token.Subject}", token);
+            if (!tokens.Any())
+                return Results.NotFound("No tokens found for the given subjects.");
+
+            return Results.Ok(tokens);
         });
     }
 }
