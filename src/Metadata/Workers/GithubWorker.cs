@@ -1,14 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http.Headers;
-using System.Reflection;
 using System.Text.Json;
-using System.Threading.Tasks;
 using Metadata.Data;
+using Metadata.Interface.GIthub;
 using Metadata.Models.Entity;
-using Metadata.Models.Github;
+using Metadata.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Metadata.Workers
 {
@@ -16,173 +14,108 @@ namespace Metadata.Workers
     {
         private readonly ILogger<GithubWorker> _logger;
         private readonly IConfiguration _config;
-        private readonly IHttpClientFactory _httpClientFactory;
         private readonly IDbContextFactory<TokenMetadataDbContext> _dbContextFactory;
+        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly string _registryOwner;
+        private readonly string _registryRepo;
 
         public GithubWorker(
             ILogger<GithubWorker> logger,
             IConfiguration config,
-            IHttpClientFactory httpClientFactory,
-            IDbContextFactory<TokenMetadataDbContext> dbContextFactory)
+            IDbContextFactory<TokenMetadataDbContext> dbContextFactory,
+            IServiceScopeFactory scopeFactory)
         {
             _logger = logger;
             _config = config;
-            _httpClientFactory = httpClientFactory;
             _dbContextFactory = dbContextFactory;
+            _scopeFactory = scopeFactory;
+            _registryOwner = config["RegistryOwner"] ?? throw new InvalidOperationException("RegistryOwner is not configured.");
+            _registryRepo = config["RegistryRepo"] ?? throw new InvalidOperationException("RegistryRepo is not configured.");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                Console.WriteLine("Starting sync cycle at " + DateTime.UtcNow);
                 _logger.LogInformation("Syncing Mappings");
+
+                using var scope = _scopeFactory.CreateScope();
+                var gitHubService = scope.ServiceProvider.GetRequiredService<IGithub>();
 
                 using var dbContext = await _dbContextFactory.CreateDbContextAsync(stoppingToken);
                 var syncState = await dbContext.SyncState
                     .OrderByDescending(ss => ss.Date)
                     .FirstOrDefaultAsync(cancellationToken: stoppingToken);
 
-                var registryOwner = _config["RegistryOwner"] ?? throw new InvalidOperationException("RegistryOwner is not configured.");
-                var registryRepo = _config["RegistryRepo"] ?? throw new InvalidOperationException("RegistryRepo is not configured.");
-                var githubPat = _config["GithubPAT"] ?? throw new InvalidOperationException("GithubPAT is not configured.");
-
-                var httpClient = _httpClientFactory.CreateClient("Github");
-                ConfigureHttpClient(httpClient, githubPat);
-
                 if (syncState is null)
                 {
-                    Console.WriteLine("No sync state found, performing full sync...");
-                    await ProcessFullSyncAsync(httpClient, dbContext, stoppingToken, registryOwner, registryRepo);
+                    await ProcessFullSyncAsync(gitHubService, dbContext, stoppingToken);
                 }
                 else
                 {
-                    Console.WriteLine("Sync state found, performing incremental sync...");
-                    await ProcessIncrementalSyncAsync(httpClient, dbContext, stoppingToken, registryOwner, registryRepo, syncState);
+                    await ProcessIncrementalSyncAsync(gitHubService, dbContext, syncState, stoppingToken);
                 }
-
-                Console.WriteLine("Sync cycle complete. Waiting for next cycle...");
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
         }
 
-        private void ConfigureHttpClient(HttpClient httpClient, string githubPat)
+        private async Task ProcessFullSyncAsync(IGithub gitHubService, TokenMetadataDbContext dbContext, CancellationToken cancellationToken)
         {
-            httpClient.DefaultRequestHeaders.UserAgent.Clear();
-            var productVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "Unknown Version";
-            httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("CardanoTokenMetadataService", productVersion));
-            httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(+https://github.com/SAIB-Inc/Cardano.Metadata)"));
-            httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", githubPat);
-        }
-
-        private async Task ProcessFullSyncAsync(HttpClient httpClient, TokenMetadataDbContext dbContext, CancellationToken cancellationToken, string registryOwner, string registryRepo)
-        {
-            Console.WriteLine("Starting full sync...");
             _logger.LogWarning("No Sync State Information, syncing all mappings...");
 
-            var commitsUrl = $"https://api.github.com/repos/{registryOwner}/{registryRepo}/commits";
-            var latestCommits = await httpClient.GetFromJsonAsync<IEnumerable<GitCommit>>(commitsUrl, cancellationToken);
-
-            if (latestCommits is not null && latestCommits.Any())
+            var commits = await gitHubService.GetCommitsAsync(_registryOwner, _registryRepo, cancellationToken);
+            var latestCommit = commits.FirstOrDefault();
+            if (latestCommit is null)
             {
-                var latestCommit = latestCommits.First();
-                var treeUrl = $"https://api.github.com/repos/{registryOwner}/{registryRepo}/git/trees/{latestCommit.Sha}?recursive=true";
-                var treeResponse = await httpClient.GetFromJsonAsync<GitTreeResponse>(treeUrl, cancellationToken);
+                _logger.LogError("Repo: {repo} Owner: {owner} has no commits!", _registryRepo, _registryOwner);
+                return;
+            }
 
-                if (treeResponse?.Tree is not null)
+            if (string.IsNullOrEmpty(latestCommit.Sha))
+            {
+                _logger.LogError("Latest commit SHA is null or empty. Cannot proceed with full sync.");
+                return;
+            }
+
+            var treeResponse = await gitHubService.GetGitTreeAsync(_registryOwner, _registryRepo, latestCommit.Sha, cancellationToken);
+            if (treeResponse?.Tree is not null)
+            {
+                foreach (var item in treeResponse.Tree)
                 {
-                    foreach (var item in treeResponse.Tree)
+                    if (item.Path is not null && item.Path.StartsWith("mappings/") && item.Path.EndsWith(".json"))
                     {
-                        if (item.Path is not null &&
-                            item.Path.StartsWith("mappings/") &&
-                            item.Path.EndsWith(".json"))
-                        {
-                            var subject = item.Path.Replace("mappings/", string.Empty)
-                                                   .Replace(".json", string.Empty);
-                            var rawUrl = $"https://raw.githubusercontent.com/{registryOwner}/{registryRepo}/{latestCommit.Sha}/{item.Path}";
-
-                            Console.WriteLine($"Processing mapping file: {rawUrl}");
-                            var mappingJson = await httpClient.GetFromJsonAsync<JsonElement>(rawUrl, cancellationToken: cancellationToken);
-                            var mappingBytes = await httpClient.GetByteArrayAsync(rawUrl, cancellationToken);
-
-                            var name = GetNestedValue(mappingJson, "name");
-                            var description = GetNestedValue(mappingJson, "description");
-                            var ticker = GetNestedValue(mappingJson, "ticker");
-                            var url = GetNestedValue(mappingJson, "url");
-                            var logo = GetNestedValue(mappingJson, "logo");
-                            var decimals = GetNestedInt(mappingJson, "decimals");
-                            var policy = subject.Length >= 56 ? subject.Substring(0, 56) : subject;
-
-                            var token = new TokenMetadata
-                            {
-                                Subject = subject,
-                                Name = name,
-                                Description = description,
-                                Policy = policy,
-                                Ticker = ticker,
-                                Url = url,
-                                Logo = logo,
-                                Decimals = decimals,
-                                Data = mappingBytes
-                            };
-
-                            Console.WriteLine($"Inserting token: {subject}, Name: {name}");
-                            _logger.LogDebug("Inserting token with Subject: {subject}, Name: {name}", subject, name);
-
-                            await dbContext.TokenMetadata.AddAsync(token, cancellationToken);
-                            await dbContext.SaveChangesAsync(cancellationToken);
-                        }
+                        var subject = item.Path.Replace("mappings/", string.Empty)
+                                               .Replace(".json", string.Empty);
+                        var rawUrl = $"https://raw.githubusercontent.com/{_registryOwner}/{_registryRepo}/{latestCommit.Sha}/{item.Path}";
+                        await ProcessMappingFileAsync(gitHubService, rawUrl, subject, latestCommit.Sha, dbContext, cancellationToken);
                     }
-
-                    await dbContext.SyncState.AddAsync(new SyncState
-                    {
-                        Sha = latestCommit.Sha ?? string.Empty,
-                        Date = latestCommit.Commit?.Author?.Date ?? DateTime.UtcNow
-                    }, cancellationToken);
-
-                    await dbContext.SaveChangesAsync(cancellationToken);
-
-                    var totalCount = await dbContext.TokenMetadata.CountAsync(cancellationToken);
-                    Console.WriteLine($"Full sync complete. Total tokens in database: {totalCount}");
-                    _logger.LogInformation("Full sync complete. Total tokens in database: {count}", totalCount);
                 }
-                else
-                {
-                    Console.WriteLine("No mapping files found in the repository tree.");
-                    _logger.LogError("Repo: {repo} Owner: {owner} has no mappings!", registryRepo, registryOwner);
-                }
+
+                await UpdateSyncStateAsync(dbContext, latestCommit.Sha, latestCommit.Commit?.Author?.Date, cancellationToken);
+
+                var totalCount = await dbContext.TokenMetadata.CountAsync(cancellationToken);
+                _logger.LogInformation("Full sync complete. Total tokens in database: {count}", totalCount);
             }
             else
             {
-                Console.WriteLine("No commits found in repository.");
-                _logger.LogError("Repo: {repo} Owner: {owner} has no commits!", registryRepo, registryOwner);
+                _logger.LogError("Repo: {repo} Owner: {owner} has no mappings!", _registryRepo, _registryOwner);
             }
         }
 
-        private async Task ProcessIncrementalSyncAsync(HttpClient httpClient, TokenMetadataDbContext dbContext, CancellationToken cancellationToken, string registryOwner, string registryRepo, SyncState syncState)
+        private async Task ProcessIncrementalSyncAsync(IGithub gitHubService, TokenMetadataDbContext dbContext, SyncState syncState, CancellationToken cancellationToken)
         {
-            Console.WriteLine("Starting incremental sync...");
-            _logger.LogInformation("Repo: {repo} Owner: {owner} checking for changes...", registryRepo, registryOwner);
+            _logger.LogInformation("Repo: {repo} Owner: {owner} checking for changes...", _registryRepo, _registryOwner);
 
-            var latestCommitsSince = new List<GitCommit>();
-            int page = 1;
-            var since = syncState.Date.AddSeconds(1).ToString("yyyy-MM-dd'T'HH:mm:ssZ");
-
-            while (true)
+            var commits = await gitHubService.GetCommitsSinceAsync(_registryOwner, _registryRepo, syncState.Date, cancellationToken);
+            foreach (var commit in commits)
             {
-                var commitsPageUrl = $"https://api.github.com/repos/{registryOwner}/{registryRepo}/commits?since={since}&page={page}";
-                var commitPage = await httpClient.GetFromJsonAsync<IEnumerable<GitCommit>>(commitsPageUrl, cancellationToken);
-                if (commitPage is null || !commitPage.Any())
-                    break;
+                if (string.IsNullOrEmpty(commit.Sha))
+                {
+                    _logger.LogWarning("Commit SHA is null or empty for commit {commitUrl}. Skipping this commit.", commit.Url);
+                    continue;
+                }
 
-                latestCommitsSince.AddRange(commitPage);
-                page++;
-            }
-
-            foreach (var commit in latestCommitsSince)
-            {
-                Console.WriteLine($"Processing incremental commit: {commit.Sha}");
-                var resolvedCommit = await httpClient.GetFromJsonAsync<GitCommit>(commit.Url, cancellationToken: cancellationToken);
+                var resolvedCommit = await gitHubService.GetCommitDetailsAsync(commit.Url, cancellationToken);
                 if (resolvedCommit?.Files is not null)
                 {
                     foreach (var file in resolvedCommit.Files)
@@ -192,60 +125,18 @@ namespace Metadata.Workers
 
                         var subject = file.Filename.Replace("mappings/", string.Empty)
                                                    .Replace(".json", string.Empty);
-                        var rawUrl = $"https://raw.githubusercontent.com/{registryOwner}/{registryRepo}/{resolvedCommit.Sha}/{file.Filename}";
-
+                        if (string.IsNullOrEmpty(resolvedCommit.Sha))
+                        {
+                            _logger.LogWarning("Resolved commit SHA is null or empty for file {fileName}. Skipping.", file.Filename);
+                            continue;
+                        }
+                        var rawUrl = $"https://raw.githubusercontent.com/{_registryOwner}/{_registryRepo}/{resolvedCommit.Sha}/{file.Filename}";
                         try
                         {
-                            Console.WriteLine($"Processing file: {rawUrl}");
-                            var mappingJson = await httpClient.GetFromJsonAsync<JsonElement>(rawUrl, cancellationToken: cancellationToken);
-                            var mappingBytes = await httpClient.GetByteArrayAsync(rawUrl, cancellationToken);
-
-                            var name = GetNestedValue(mappingJson, "name");
-                            var description = GetNestedValue(mappingJson, "description");
-                            var ticker = GetNestedValue(mappingJson, "ticker");
-                            var url = GetNestedValue(mappingJson, "url");
-                            var logo = GetNestedValue(mappingJson, "logo");
-                            var decimals = GetNestedInt(mappingJson, "decimals");
-                            var policy = subject.Length >= 56 ? subject.Substring(0, 56) : subject;
-
-                            var existingMetadata = await dbContext.TokenMetadata
-                                .FirstOrDefaultAsync(tm => tm.Subject.ToLower() == subject.ToLower(), cancellationToken: cancellationToken);
-
-                            if (existingMetadata is not null)
-                            {
-                                existingMetadata.Data = mappingBytes;
-                                existingMetadata.Name = name;
-                                existingMetadata.Description = description;
-                                existingMetadata.Policy = policy;
-                                existingMetadata.Ticker = ticker;
-                                existingMetadata.Url = url;
-                                existingMetadata.Logo = logo;
-                                existingMetadata.Decimals = decimals;
-                                Console.WriteLine($"Updated token: {subject}");
-                                _logger.LogDebug("Updated token: {subject}", subject);
-                            }
-                            else
-                            {
-                                var newToken = new TokenMetadata
-                                {
-                                    Subject = subject,
-                                    Name = name,
-                                    Description = description,
-                                    Policy = policy,
-                                    Ticker = ticker,
-                                    Url = url,
-                                    Logo = logo,
-                                    Decimals = decimals,
-                                    Data = mappingBytes
-                                };
-                                Console.WriteLine($"Inserting new token: {subject}, Name: {name}");
-                                _logger.LogDebug("Inserting new token: {subject}, Name: {name}", subject, name);
-                                await dbContext.TokenMetadata.AddAsync(newToken, cancellationToken);
-                            }
+                            await ProcessMappingFileAsync(gitHubService, rawUrl, subject, resolvedCommit.Sha, dbContext, cancellationToken);
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Error processing file {rawUrl}: {ex.Message}");
                             _logger.LogError(ex, "Error processing file: {file}. Deleting metadata if exists...", rawUrl);
                             var existingMetadata = await dbContext.TokenMetadata
                                 .FirstOrDefaultAsync(tm => tm.Subject.ToLower() == subject.ToLower(), cancellationToken: cancellationToken);
@@ -256,19 +147,83 @@ namespace Metadata.Workers
                         }
                     }
                 }
-
-                await dbContext.SyncState.AddAsync(new SyncState
-                {
-                    Sha = commit.Sha ?? string.Empty,
-                    Date = commit.Commit?.Author?.Date ?? DateTime.UtcNow
-                }, cancellationToken);
-
-                await dbContext.SaveChangesAsync(cancellationToken);
+                await UpdateSyncStateAsync(dbContext, commit.Sha, commit.Commit?.Author?.Date, cancellationToken);
 
                 var totalCount = await dbContext.TokenMetadata.CountAsync(cancellationToken);
-                Console.WriteLine($"Incremental sync complete for commit {commit.Sha}. Total tokens in database: {totalCount}");
                 _logger.LogInformation("Incremental sync complete for commit {sha}. Total tokens in database: {count}", commit.Sha, totalCount);
             }
+        }
+
+
+        private async Task UpdateSyncStateAsync(TokenMetadataDbContext dbContext, string? sha, DateTime? commitDate, CancellationToken cancellationToken)
+        {
+            await dbContext.SyncState.AddAsync(new SyncState
+            {
+                Sha = sha ?? string.Empty,
+                Date = commitDate ?? DateTime.UtcNow
+            }, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        private async Task ProcessMappingFileAsync(IGithub gitHubService, string rawUrl, string subject, string commitSha, TokenMetadataDbContext dbContext, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(commitSha))
+            {
+                _logger.LogWarning("Commit SHA is null or empty for file {url}. Skipping processing.", rawUrl);
+                return;
+            }
+
+            _logger.LogInformation("Processing mapping file: {url}", rawUrl);
+
+            var mappingJson = await gitHubService.GetMappingJsonAsync(rawUrl, cancellationToken);
+            var mappingBytes = await gitHubService.GetMappingBytesAsync(rawUrl, cancellationToken);
+
+            var token = CreateTokenMetadata(mappingJson, mappingBytes, subject);
+            var existingToken = await dbContext.TokenMetadata
+                .FirstOrDefaultAsync(tm => tm.Subject.ToLower() == subject.ToLower(), cancellationToken: cancellationToken);
+
+            if (existingToken is not null)
+            {
+                existingToken.Name = token.Name;
+                existingToken.Description = token.Description;
+                existingToken.Policy = token.Policy;
+                existingToken.Ticker = token.Ticker;
+                existingToken.Url = token.Url;
+                existingToken.Logo = token.Logo;
+                existingToken.Decimals = token.Decimals;
+                existingToken.Data = token.Data;
+                _logger.LogDebug("Updated token: {subject}", subject);
+            }
+            else
+            {
+                await dbContext.TokenMetadata.AddAsync(token, cancellationToken);
+                await dbContext.SaveChangesAsync();
+                _logger.LogDebug("Inserting new token: {subject}, Name: {name}", subject, token.Name);
+            }
+        }
+
+        private TokenMetadata CreateTokenMetadata(JsonElement mappingJson, byte[] mappingBytes, string subject)
+        {
+            string name = GetNestedValue(mappingJson, "name");
+            string description = GetNestedValue(mappingJson, "description");
+            string ticker = GetNestedValue(mappingJson, "ticker");
+            string url = GetNestedValue(mappingJson, "url");
+            string logo = GetNestedValue(mappingJson, "logo");
+            int decimals = GetNestedInt(mappingJson, "decimals");
+            var policy = subject.Length >= 56 ? subject.Substring(0, 56) : subject;
+
+            return new TokenMetadata
+            {
+                Subject = subject,
+                Name = name,
+                Description = description,
+                Policy = policy,
+                Ticker = ticker,
+                Url = url,
+                Logo = logo,
+                Decimals = decimals,
+                Data = mappingBytes
+            };
         }
 
         private static string GetNestedValue(JsonElement json, string propertyName)

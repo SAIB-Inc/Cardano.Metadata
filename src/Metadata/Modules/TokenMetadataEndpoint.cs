@@ -4,7 +4,7 @@ using Metadata.Data;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
-
+using LinqKit;
 namespace Metadata.Modules;
 
 public class TokenMetadataEndpoint : CarterModule
@@ -22,62 +22,36 @@ public class TokenMetadataEndpoint : CarterModule
             return Results.Ok(result);
         });
 
-        // POST endpoint for advanced querying
+        //BATCH Query with different params for advance query
         app.MapPost("/metadata", async (
             TokenMetadataDbContext db,
             [FromBody] List<string> subjects,
             int? limit,
-            string? searchKey,
-            string? policyId,
-            int offset = 0,
-            bool includeEmptyName = false,
-            bool includeEmptyLogo = false,
-            bool includeEmptyTicker = false) =>
+            string? searchKey) =>
         {
             if (subjects is null || subjects.Count == 0)
                 return Results.BadRequest("No subjects provided.");
 
-            IQueryable<TokenMetadata> query = db.TokenMetadata;
+            var lowerSubjects = subjects.Select(s => s.ToLower()).ToList();
 
-            if (!string.IsNullOrWhiteSpace(policyId))
-            {
-                query = query.Where(t => EF.Functions.ILike(t.Subject, policyId + "%"));
-            }
+            var predicate = PredicateBuilder.New<TokenMetadata>(true);
 
-            if (!includeEmptyName)
-                query = query.Where(t => !string.IsNullOrEmpty(t.Name));
-            if (!includeEmptyLogo)
-                query = query.Where(t => !string.IsNullOrEmpty(t.Logo));
-            if (!includeEmptyTicker)
-                query = query.Where(t => !string.IsNullOrEmpty(t.Ticker));
+            predicate = predicate.And(token => lowerSubjects.Contains(token.Subject.ToLower()));
 
-            if (subjects.Count == 1)
-            {
-                var s = subjects[0].ToLower();
-                query = query.Where(t => EF.Functions.ILike(t.Subject, s));
-            }
-            else
-            {
-                var orQuery = query.Where(t => false);
-                foreach (var subj in subjects)
-                {
-                    var s = subj.ToLower();
-                    orQuery = orQuery.Union(query.Where(t => EF.Functions.ILike(t.Subject, s)));
-                }
-                query = orQuery;
-            }
             if (!string.IsNullOrWhiteSpace(searchKey))
             {
-                var pattern = $"%{searchKey.ToLower()}%";
-                query = query.Where(t =>
-                    EF.Functions.ILike(t.Name, pattern) ||
-                    EF.Functions.ILike(t.Ticker, pattern)
-                );
+                var searchPredicate = PredicateBuilder.New<TokenMetadata>(false);
+                searchPredicate = searchPredicate.Or(token => token.Name.Contains(searchKey));
+                searchPredicate = searchPredicate.Or(token => token.Description.Contains(searchKey));
+                searchPredicate = searchPredicate.Or(token => token.Ticker.Contains(searchKey));
+
+                predicate = predicate.And(searchPredicate);
             }
 
+            IQueryable<TokenMetadata> query = db.TokenMetadata.Where(predicate);
+
+
             int total = await query.CountAsync();
-            query = query.OrderBy(t => t.Ticker)
-                         .Skip(offset);
 
             if (limit.HasValue)
                 query = query.Take(limit.Value);
@@ -89,5 +63,6 @@ public class TokenMetadataEndpoint : CarterModule
 
             return Results.Ok(new { total, data = tokens });
         });
+
     }
 }
