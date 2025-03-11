@@ -1,6 +1,0 @@
-@Metadata_HostAddress = http://localhost:5118
-
-GET {{Metadata_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
