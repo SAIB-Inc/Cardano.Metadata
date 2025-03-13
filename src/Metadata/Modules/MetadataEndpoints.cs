@@ -53,19 +53,33 @@ public class MetadataEndpoints : CarterModule
                 predicate = predicate.And(searchPredicate);
             }
 
-            IQueryable<TokenMetadata> query = db.TokenMetadata.AsNoTracking().Where(predicate);
+            IQueryable<byte[]> query = db.TokenMetadata.AsNoTracking()
+                .Where(predicate)
+                .Select(token => token.Data);
 
             int total = await query.CountAsync();
 
             if (limit.HasValue)
                 query = query.Take(limit.Value);
 
-            var tokens = await query.ToListAsync();
+            var dataList = await query.ToListAsync();
 
-            if (tokens.Count == 0)
+            if (dataList.Count == 0)
                 return Results.NotFound("No tokens found for the given subjects.");
 
-            return Results.Ok(new { total, data = tokens });
+            var result = dataList.Select(data =>
+            {
+                try
+                {
+                    return JsonSerializer.Deserialize<JsonElement>(data);
+                }
+                catch (JsonException)
+                {
+                    return default(JsonElement);
+                }
+            }).ToList();
+
+            return Results.Ok(new { total, data = result });
         });
 
     }
