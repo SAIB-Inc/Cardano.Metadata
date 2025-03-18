@@ -1,12 +1,12 @@
 using System.Text.Json;
 using Carter;
 using LinqKit;
-using Comp.Data;
-using Comp.Models.Entity;
+using Cardano.Metadata.Data;
+using Cardano.Metadata.Models.Entity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace Comp.Modules;
+namespace Cardano.Metadata.Modules;
 
 public class MetadataEndpoints : CarterModule
 {

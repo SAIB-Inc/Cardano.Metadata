@@ -1,5 +1,5 @@
 
-namespace Comp.Models.Entity;
+namespace Cardano.Metadata.Models.Entity;
 
 public record TokenMetadata
 {
