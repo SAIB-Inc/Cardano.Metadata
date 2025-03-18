@@ -28,14 +28,13 @@ namespace Cardano.Metadata.Migrations
                 columns: table => new
                 {
                     Subject = table.Column<string>(type: "text", nullable: false),
-                    Name = table.Column<string>(type: "text", nullable: false),
-                    Description = table.Column<string>(type: "text", nullable: false),
-                    Policy = table.Column<string>(type: "text", nullable: false),
-                    Ticker = table.Column<string>(type: "text", nullable: false),
-                    Url = table.Column<string>(type: "text", nullable: false),
-                    Logo = table.Column<string>(type: "text", nullable: false),
-                    Decimals = table.Column<int>(type: "integer", nullable: false),
-                    Data = table.Column<byte[]>(type: "bytea", nullable: false)
+                    Name = table.Column<string>(type: "text", nullable: true),
+                    Description = table.Column<string>(type: "text", nullable: true),
+                    Policy = table.Column<string>(type: "text", nullable: true),
+                    Ticker = table.Column<string>(type: "text", nullable: true),
+                    Url = table.Column<string>(type: "text", nullable: true),
+                    Logo = table.Column<string>(type: "text", nullable: true),
+                    Decimals = table.Column<int>(type: "integer", nullable: true)
                 },
                 constraints: table =>
                 {

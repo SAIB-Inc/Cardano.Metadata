@@ -40,35 +40,25 @@ namespace Cardano.Metadata.Migrations
                     b.Property<string>("Subject")
                         .HasColumnType("text");
 
-                    b.Property<byte[]>("Data")
-                        .IsRequired()
-                        .HasColumnType("bytea");
-
-                    b.Property<int>("Decimals")
+                    b.Property<int?>("Decimals")
                         .HasColumnType("integer");
 
                     b.Property<string>("Description")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Logo")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Name")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Policy")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Ticker")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Url")
-                        .IsRequired()
                         .HasColumnType("text");
 
                     b.HasKey("Subject");
