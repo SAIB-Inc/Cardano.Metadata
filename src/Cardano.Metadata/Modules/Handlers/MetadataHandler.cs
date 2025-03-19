@@ -2,6 +2,7 @@ using Cardano.Metadata.Data;
 using Cardano.Metadata.Models.Entity;
 using Microsoft.EntityFrameworkCore;
 using LinqKit;
+using Cardano.Metadata.Models.Response;
 
 namespace Cardano.Metadata.Modules.Handlers
 {
@@ -12,12 +13,28 @@ namespace Cardano.Metadata.Modules.Handlers
         // Fetch data by subject
         public async Task<IResult> GetTokenMetadataAsync(string subject)
         {
-            using var db = _dbContextFactory.CreateDbContext();
+            using var db = await _dbContextFactory.CreateDbContextAsync();
             var token = await db.TokenMetadata
                 .AsNoTracking()
                 .FirstOrDefaultAsync(t => t.Subject == subject);
 
-            return token is null ? Results.NotFound() : Results.Ok(token);
+            if (token is null)
+                return Results.NotFound();
+
+            var metadataResponse = new MetadataResponse
+            {
+                Subject = token.Subject ?? string.Empty,
+                Decimals = new ValueResponse<int> { Value = token.Decimals ?? 0 }, 
+                Description = token.Description is not null
+                    ? new ValueResponse<string> { Value = token.Description }
+                    : null,
+                Name = new ValueResponse<string> { Value = token.Name ?? string.Empty},
+                Ticker = new ValueResponse<string> { Value = token.Ticker ?? string.Empty},
+                Url = new ValueResponse<string> { Value = token.Url ?? string.Empty},
+                Logo = new ValueResponse<string> { Value = token.Logo ?? string.Empty}
+            };
+
+            return Results.Ok(metadataResponse);
         }
 
         // Fetch data by batch with additional filtering
@@ -34,7 +51,7 @@ namespace Cardano.Metadata.Modules.Handlers
             if (subjects is null || subjects.Count == 0)
                 return Results.BadRequest("No subjects provided.");
 
-            using var db = _dbContextFactory.CreateDbContext();
+            using var db = await _dbContextFactory.CreateDbContextAsync();
 
             var distinctSubjects = subjects.Distinct().ToList();
             var predicate = PredicateBuilder.New<TokenMetadata>(false);
@@ -48,7 +65,7 @@ namespace Cardano.Metadata.Modules.Handlers
             {
                 predicate = predicate.And(token =>
                     token.Subject != null &&
-                    token.Subject.Substring(0, 56).ToLower() == policyId.ToLower());
+                    token.Subject.Substring(0, 56).Equals(policyId, StringComparison.CurrentCultureIgnoreCase));
             }
 
             if (!includeEmptyName)
@@ -89,8 +106,21 @@ namespace Cardano.Metadata.Modules.Handlers
 
             if (tokenList.Count == 0)
                 return Results.NotFound("No tokens found for the given subjects.");
+            
+            var metadataResponses = tokenList.Select(token => new MetadataResponse
+            {
+                Subject = token.Subject ?? string.Empty,
+                Decimals = new ValueResponse<int> { Value = token.Decimals ?? 0 },
+                Description = token.Description is not null
+                    ? new ValueResponse<string> { Value = token.Description }
+                    : null,
+                Name = new ValueResponse<string> { Value = token.Name ?? string.Empty },
+                Ticker = new ValueResponse<string> { Value = token.Ticker ?? string.Empty },
+                Url = new ValueResponse<string> { Value = token.Url ?? string.Empty },
+                Logo = new ValueResponse<string> { Value = token.Logo ?? string.Empty } 
+            }).ToList();
 
-            return Results.Ok(new { total, data = tokenList });
+            return Results.Ok(new { total, data = metadataResponses });
         }
     }
 }
