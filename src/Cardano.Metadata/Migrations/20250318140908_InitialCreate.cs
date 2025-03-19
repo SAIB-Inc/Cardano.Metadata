@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -17,7 +16,7 @@ namespace Cardano.Metadata.Migrations
                 columns: table => new
                 {
                     Sha = table.Column<string>(type: "text", nullable: false),
-                    Date = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    Date = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -29,12 +28,23 @@ namespace Cardano.Metadata.Migrations
                 columns: table => new
                 {
                     Subject = table.Column<string>(type: "text", nullable: false),
-                    Data = table.Column<JsonElement>(type: "jsonb", nullable: false)
+                    Name = table.Column<string>(type: "text", nullable: true),
+                    Description = table.Column<string>(type: "text", nullable: true),
+                    Policy = table.Column<string>(type: "text", nullable: true),
+                    Ticker = table.Column<string>(type: "text", nullable: true),
+                    Url = table.Column<string>(type: "text", nullable: true),
+                    Logo = table.Column<string>(type: "text", nullable: true),
+                    Decimals = table.Column<int>(type: "integer", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_TokenMetadata", x => x.Subject);
                 });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TokenMetadata_Name_Description_Ticker",
+                table: "TokenMetadata",
+                columns: new[] { "Name", "Description", "Ticker" });
         }
 
         /// <inheritdoc />
