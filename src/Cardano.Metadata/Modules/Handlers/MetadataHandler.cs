@@ -2,6 +2,8 @@ using Cardano.Metadata.Data;
 using Cardano.Metadata.Models.Entity;
 using Microsoft.EntityFrameworkCore;
 using LinqKit;
+using Cardano.Metadata.Models.Response;
+using Microsoft.CodeAnalysis;
 
 namespace Cardano.Metadata.Modules.Handlers
 {
@@ -12,12 +14,15 @@ namespace Cardano.Metadata.Modules.Handlers
         // Fetch data by subject
         public async Task<IResult> GetTokenMetadataAsync(string subject)
         {
-            using var db = _dbContextFactory.CreateDbContext();
-            var token = await db.TokenMetadata
+            using var db = await _dbContextFactory.CreateDbContextAsync();
+            var token = await db.MetaData
                 .AsNoTracking()
                 .FirstOrDefaultAsync(t => t.Subject == subject);
 
-            return token is null ? Results.NotFound() : Results.Ok(token);
+            if (token is null)
+                return Results.NotFound();
+
+            return Results.Ok(token);
         }
 
         // Fetch data by batch with additional filtering
@@ -34,10 +39,10 @@ namespace Cardano.Metadata.Modules.Handlers
             if (subjects is null || subjects.Count == 0)
                 return Results.BadRequest("No subjects provided.");
 
-            using var db = _dbContextFactory.CreateDbContext();
+            using var db = await _dbContextFactory.CreateDbContextAsync();
 
             var distinctSubjects = subjects.Distinct().ToList();
-            var predicate = PredicateBuilder.New<TokenMetadata>(false);
+            var predicate = PredicateBuilder.New<MetaData>(false);
 
             foreach (var subject in distinctSubjects)
             {
@@ -48,7 +53,7 @@ namespace Cardano.Metadata.Modules.Handlers
             {
                 predicate = predicate.And(token =>
                     token.Subject != null &&
-                    token.Subject.Substring(0, 56).ToLower() == policyId.ToLower());
+                    token.Subject.Substring(0, 56).Equals(policyId, StringComparison.CurrentCultureIgnoreCase));
             }
 
             if (!includeEmptyName)
@@ -69,14 +74,14 @@ namespace Cardano.Metadata.Modules.Handlers
             if (!string.IsNullOrWhiteSpace(searchKey))
             {
                 var lowerSearchKey = searchKey.ToLower();
-                var searchPredicate = PredicateBuilder.New<TokenMetadata>(false);
+                var searchPredicate = PredicateBuilder.New<MetaData>(false);
                 searchPredicate = searchPredicate.Or(token => token.Name != null && EF.Functions.Like(token.Name.ToLower(), lowerSearchKey + "%"));
                 searchPredicate = searchPredicate.Or(token => token.Description != null && EF.Functions.Like(token.Description.ToLower(), lowerSearchKey + "%"));
                 searchPredicate = searchPredicate.Or(token => token.Ticker != null && EF.Functions.Like(token.Ticker.ToLower(), lowerSearchKey + "%"));
                 predicate = predicate.And(searchPredicate);
             }
 
-            IQueryable<TokenMetadata> query = db.TokenMetadata
+            IQueryable<MetaData> query = db.MetaData
                 .AsNoTracking()
                 .Where(predicate);
 
