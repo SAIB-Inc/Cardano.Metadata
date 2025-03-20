@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cardano.Metadata.Migrations
 {
     [DbContext(typeof(MetadataDbContext))]
-    [Migration("20250318140908_InitialCreate")]
+    [Migration("20250320143205_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -25,6 +25,43 @@ namespace Cardano.Metadata.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Cardano.Metadata.Models.Entity.MetaData", b =>
+                {
+                    b.Property<string>("Subject")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Decimals")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Logo")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Policy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Ticker")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Url")
+                        .HasColumnType("text");
+
+                    b.HasKey("Subject");
+
+                    b.HasIndex("Name", "Description", "Ticker")
+                        .HasDatabaseName("IX_TokenMetadata_Name_Description_Ticker");
+
+                    b.ToTable("MetaData");
+                });
+
             modelBuilder.Entity("Cardano.Metadata.Models.Entity.SyncState", b =>
                 {
                     b.Property<string>("Sha")
@@ -36,40 +73,6 @@ namespace Cardano.Metadata.Migrations
                     b.HasKey("Sha");
 
                     b.ToTable("SyncState");
-                });
-
-            modelBuilder.Entity("Cardano.Metadata.Models.Entity.TokenMetadata", b =>
-                {
-                    b.Property<string>("Subject")
-                        .HasColumnType("text");
-
-                    b.Property<int?>("Decimals")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Logo")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Name")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Policy")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Ticker")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Url")
-                        .HasColumnType("text");
-
-                    b.HasKey("Subject");
-
-                    b.HasIndex("Name", "Description", "Ticker")
-                        .HasDatabaseName("IX_TokenMetadata_Name_Description_Ticker");
-
-                    b.ToTable("TokenMetadata");
                 });
 #pragma warning restore 612, 618
         }
