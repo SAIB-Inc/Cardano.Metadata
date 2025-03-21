@@ -23,7 +23,7 @@ public class DatabaseHandler(ILogger<Github> logger, IDbContextFactory<MetadataD
 
     }
 
-    public async Task<MetaData> GetOrCreateTokenAsync(JsonElement mappingJson, string subject, CancellationToken cancellationToken)
+    public async Task<MetaData?> GetOrCreateTokenAsync(JsonElement mappingJson, string subject, CancellationToken cancellationToken)
     {
         using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -32,9 +32,13 @@ public class DatabaseHandler(ILogger<Github> logger, IDbContextFactory<MetadataD
 
         var registryItem = CreateTokenMetadata(mappingJson, subject);
 
-        if (string.IsNullOrEmpty(registryItem.Subject) || registryItem.Decimals == null || string.IsNullOrEmpty(registryItem.Name?.Value) || string.IsNullOrEmpty(registryItem.Ticker?.Value))
+        if (registryItem == null ||
+            string.IsNullOrEmpty(registryItem.Subject) ||
+            registryItem.Name == null || string.IsNullOrEmpty(registryItem.Name.Value) ||
+            registryItem.Ticker == null || string.IsNullOrEmpty(registryItem.Ticker.Value) ||
+            registryItem.Decimals == null || registryItem.Decimals.Value <= 0)
         {
-            _logger.LogWarning("Invalid data for token. Name, Ticker, or Subject cannot be null or empty.");
+            _logger.LogWarning("Invalid token data. Name, Ticker, Subject or Decimals cannot be null or empty.");
             return null;
         }
 
@@ -50,13 +54,12 @@ public class DatabaseHandler(ILogger<Github> logger, IDbContextFactory<MetadataD
             registryItem.Description?.Value ?? null
         );
 
-        if (existingToken != null)
-        {
-            _logger.LogDebug("Updated token: {subject}", subject);
-        }
+        await dbContext.MetaData.AddAsync(token, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return token;
     }
+
 
     public async Task<SyncState?> GetLatestSyncStateAsync(CancellationToken cancellationToken)
     {
@@ -66,14 +69,9 @@ public class DatabaseHandler(ILogger<Github> logger, IDbContextFactory<MetadataD
             .FirstOrDefaultAsync(cancellationToken: cancellationToken);
     }
 
-    private static RegistryItem CreateTokenMetadata(JsonElement mappingJson, string subject)
+    private static RegistryItem? CreateTokenMetadata(JsonElement mappingJson, string subject)
     {
-        var registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText());
-
-        if (registryItem == null)
-        {
-            throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
-        }
+        var registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText()) ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
 
         var name = registryItem.ContainsKey("name") ? registryItem["name"].GetProperty("value").GetString() : null;
         var ticker = registryItem.ContainsKey("ticker") ? registryItem["ticker"].GetProperty("value").GetString() : null;
@@ -82,6 +80,11 @@ public class DatabaseHandler(ILogger<Github> logger, IDbContextFactory<MetadataD
         var url = registryItem.ContainsKey("url") ? registryItem["url"].GetProperty("value").GetString() : null;
         var logo = registryItem.ContainsKey("logo") ? registryItem["logo"].GetProperty("value").GetString() : null;
         var decimals = registryItem.ContainsKey("decimals") ? registryItem["decimals"].GetProperty("value").GetInt32() : 0;
+
+        if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(name) || string.IsNullOrEmpty(ticker))
+        {
+            return null;
+        }
 
         var result = new RegistryItem
         {
