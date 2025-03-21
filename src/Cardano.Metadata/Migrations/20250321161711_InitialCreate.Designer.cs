@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cardano.Metadata.Migrations
 {
     [DbContext(typeof(MetadataDbContext))]
-    [Migration("20250320143205_InitialCreate")]
+    [Migration("20250321161711_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -44,6 +44,9 @@ namespace Cardano.Metadata.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Policy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PolicyId")
                         .IsRequired()
                         .HasColumnType("text");
 
