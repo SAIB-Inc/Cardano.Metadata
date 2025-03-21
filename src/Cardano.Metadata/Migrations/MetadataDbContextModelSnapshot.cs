@@ -54,6 +54,9 @@ namespace Cardano.Metadata.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Policy")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PolicyId")
                         .IsRequired()
                         .HasColumnType("text");
 

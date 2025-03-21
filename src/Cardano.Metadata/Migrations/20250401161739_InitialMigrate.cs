@@ -30,8 +30,9 @@ namespace Cardano.Metadata.Migrations
                     Subject = table.Column<string>(type: "text", nullable: false),
                     Name = table.Column<string>(type: "text", nullable: false),
                     Ticker = table.Column<string>(type: "text", nullable: false),
-                    Policy = table.Column<string>(type: "text", nullable: false),
+                    PolicyId = table.Column<string>(type: "text", nullable: false),
                     Decimals = table.Column<int>(type: "integer", nullable: false),
+                    Policy = table.Column<string>(type: "text", nullable: true),
                     Url = table.Column<string>(type: "text", nullable: true),
                     Logo = table.Column<string>(type: "text", nullable: true),
                     Description = table.Column<string>(type: "text", nullable: true)
