@@ -2,7 +2,6 @@ using Cardano.Metadata.Data;
 using Cardano.Metadata.Models.Entity;
 using Microsoft.EntityFrameworkCore;
 using LinqKit;
-using Cardano.Metadata.Models.Response;
 using Microsoft.CodeAnalysis;
 
 namespace Cardano.Metadata.Modules.Handlers
