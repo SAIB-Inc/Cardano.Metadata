@@ -12,7 +12,6 @@ public class GithubService
     private readonly string _registryRepo;
     private readonly string _githubPat;
     private readonly HttpClient _httpClient;
-    private readonly MetadataDbService _metadataDbService;
 
     public GithubService(
        ILogger<GithubService> logger,
@@ -21,7 +20,6 @@ public class GithubService
        MetadataDbService metadataDbService)
     {
         _logger = logger;
-        _metadataDbService = metadataDbService;
         _registryOwner = config["RegistryOwner"] ?? throw new InvalidOperationException("RegistryOwner is not configured.");
         _registryRepo = config["RegistryRepo"] ?? throw new InvalidOperationException("RegistryRepo is not configured.");
         _githubPat = config["GithubPAT"] ?? throw new InvalidOperationException("GithubPAT is not configured.");
@@ -51,44 +49,17 @@ public class GithubService
             ?? throw new InvalidOperationException("GitTreeResponse is null.");
     }
 
-    private async Task<JsonElement> GetMappingJsonAsync(string rawUrl, CancellationToken cancellationToken)
+    public async Task<JsonElement> GetMappingJsonAsync(string rawUrl, CancellationToken cancellationToken)
     {
         return await _httpClient.GetFromJsonAsync<JsonElement>(rawUrl, cancellationToken: cancellationToken);
     }
 
-    public async Task ProcessMappingsAsync(string commitSha, CancellationToken cancellationToken)
+    public string GetRawFileLink(string commitSha, string filePath)
     {
-        var treeResponse = await GetGitTreeAsync(commitSha, cancellationToken);
-
-        if (treeResponse?.Tree != null)
-        {
-            foreach (var item in treeResponse.Tree)
-            {
-                if (item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
-                {
-                    var subject = item.Path.Replace("mappings/", string.Empty).Replace(".json", string.Empty);
-                    var rawUrl = $"https://raw.githubusercontent.com/{_registryOwner}/{_registryRepo}/{commitSha}/{item.Path}";
-                    if (string.IsNullOrEmpty(commitSha))
-                    {
-                        _logger.LogWarning("Commit SHA is null or empty for file with subject {subject}. Skipping processing.", subject);
-                        return;
-                    }
-
-                    _logger.LogInformation("Processing mapping file for subject: {subject}", subject);
-
-                    var mappingJson = await GetMappingJsonAsync(rawUrl, cancellationToken);
-
-                    await _metadataDbService.GetOrCreateTokenAsync(mappingJson, subject, cancellationToken);
-
-                }
-            }
-        }
-        else
-        {
-            _logger.LogError("No mappings found in the repository.");
-        }
-
-
+        return $"https://raw.githubusercontent.com/{_registryOwner}/{_registryRepo}/{commitSha}/{filePath}";
     }
+
+
+
 
 }

@@ -10,11 +10,12 @@ public class MetadataDbService(ILogger<MetadataDbService> logger, IDbContextFact
 {
     private readonly ILogger<MetadataDbService> _logger = logger;
 
-    public RegistryItem? CreateTokenMetadata(JsonElement mappingJson, string subject)
+    public RegistryItem? CreateTokenMetadata(JsonElement mappingJson)
     {
         var registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
                            ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
 
+        var subject = registryItem.ContainsKey("subject") ? registryItem["subject"].GetString() : null;
         var name = registryItem.ContainsKey("name") ? registryItem["name"].GetProperty("value").GetString() : null;
         var ticker = registryItem.ContainsKey("ticker") ? registryItem["ticker"].GetProperty("value").GetString() : null;
         var description = registryItem.ContainsKey("description") ? registryItem["description"].GetProperty("value").GetString() : null;
@@ -44,14 +45,11 @@ public class MetadataDbService(ILogger<MetadataDbService> logger, IDbContextFact
         return result;
     }
 
-    public async Task<MetaData?> GetOrCreateTokenAsync(JsonElement mappingJson, string subject, CancellationToken cancellationToken)
+    public async Task<MetaData?> CreateTokenAsync(JsonElement mappingJson, CancellationToken cancellationToken)
     {
         var dbContext = await _dbContextFactory.CreateDbContextAsync();
-        var existingToken = await dbContext.MetaData
-            .FirstOrDefaultAsync(tm => tm.Subject != null && tm.Subject.ToLower() == subject.ToLower(), cancellationToken);
 
-
-        var registryItem = CreateTokenMetadata(mappingJson, subject);
+        var registryItem = CreateTokenMetadata(mappingJson);
 
         if (registryItem == null ||
             string.IsNullOrEmpty(registryItem.Subject) ||
@@ -76,8 +74,6 @@ public class MetadataDbService(ILogger<MetadataDbService> logger, IDbContextFact
         );
 
         await dbContext.MetaData.AddAsync(token, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
         return token;
     }
 }
