@@ -1,4 +1,5 @@
 using Cardano.Metadata.Data;
+using Cardano.Metadata.Models.Entity;
 using Cardano.Metadata.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,12 +52,17 @@ public class GithubWorker(
                         await _metadataDbService.CreateTokenAsync(mappingJson, stoppingToken);
                     }
                 }
+                await dbContext.SyncState.AddAsync(new SyncState(
+                                latestCommit.Sha ?? string.Empty,
+                                latestCommit.Commit?.Author?.Date ?? DateTimeOffset.UtcNow
+                            ), stoppingToken);
+
+                await dbContext.SaveChangesAsync(stoppingToken);
             }
             else
             {
                 _logger.LogError("No mappings found in the repository.");
             }
-            await dbContext.SaveChangesAsync();
         }
 
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);

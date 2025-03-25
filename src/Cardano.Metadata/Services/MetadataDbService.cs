@@ -55,7 +55,7 @@ public class MetadataDbService(ILogger<MetadataDbService> logger, IDbContextFact
             string.IsNullOrEmpty(registryItem.Subject) ||
             registryItem.Name == null || string.IsNullOrEmpty(registryItem.Name.Value) ||
             registryItem.Ticker == null || string.IsNullOrEmpty(registryItem.Ticker.Value) ||
-            registryItem.Decimals == null || registryItem.Decimals.Value <= 0)
+            registryItem.Decimals == null || registryItem.Decimals.Value < 0)
         {
             _logger.LogWarning("Invalid token data. Name, Ticker, Subject or Decimals cannot be null or empty.");
             return null;
@@ -74,6 +74,7 @@ public class MetadataDbService(ILogger<MetadataDbService> logger, IDbContextFact
         );
 
         await dbContext.MetaData.AddAsync(token, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
         return token;
     }
 }
