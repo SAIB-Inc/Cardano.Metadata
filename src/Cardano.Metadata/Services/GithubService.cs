@@ -1,45 +1,22 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
 using Cardano.Metadata.Models.Github;
-
 
 namespace Cardano.Metadata.Services;
 
 public class GithubService
+(
+   IConfiguration config,
+   IHttpClientFactory httpClientFactory)
 {
-    private readonly ILogger<GithubService> _logger;
-    private readonly string _registryOwner;
-    private readonly string _registryRepo;
-    private readonly string _githubPat;
-    private readonly HttpClient _httpClient;
+    private readonly string _registryOwner = config["RegistryOwner"] ?? throw new InvalidOperationException("RegistryOwner is not configured.");
+    private readonly string _registryRepo = config["RegistryRepo"] ?? throw new InvalidOperationException("RegistryRepo is not configured.");
+    private readonly HttpClient _httpClient = httpClientFactory.CreateClient("GithubApi");
 
-    public GithubService(
-       ILogger<GithubService> logger,
-       IConfiguration config,
-       IHttpClientFactory httpClientFactory,
-       MetadataDbService metadataDbService)
-    {
-        _logger = logger;
-        _registryOwner = config["RegistryOwner"] ?? throw new InvalidOperationException("RegistryOwner is not configured.");
-        _registryRepo = config["RegistryRepo"] ?? throw new InvalidOperationException("RegistryRepo is not configured.");
-        _githubPat = config["GithubPAT"] ?? throw new InvalidOperationException("GithubPAT is not configured.");
-        _httpClient = httpClientFactory.CreateClient("Github");
-        ConfigureHttpClient(config);
-    }
-
-    private void ConfigureHttpClient(IConfiguration config)
-    {
-        _httpClient.DefaultRequestHeaders.UserAgent.Clear();
-        _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("CardanoTokenMetadataService", "1.0"));
-        _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(+https://github.com/SAIB-Inc/Cardano.Metadata)"));
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _githubPat);
-    }
-
-    public async Task<IEnumerable<GitCommit>> GetCommitsAsync(CancellationToken cancellationToken)
+    public async Task<GitCommit?> GetCommitsAsync(CancellationToken cancellationToken)
     {
         var commitsUrl = $"https://api.github.com/repos/{_registryOwner}/{_registryRepo}/commits";
         var commits = await _httpClient.GetFromJsonAsync<IEnumerable<GitCommit>>(commitsUrl, cancellationToken);
-        return commits ?? Enumerable.Empty<GitCommit>();
+        return commits?.FirstOrDefault();
     }
 
     public async Task<GitTreeResponse> GetGitTreeAsync(string commitSha, CancellationToken cancellationToken)
@@ -49,17 +26,10 @@ public class GithubService
             ?? throw new InvalidOperationException("GitTreeResponse is null.");
     }
 
-    public async Task<JsonElement> GetMappingJsonAsync(string rawUrl, CancellationToken cancellationToken)
+    public async Task<JsonElement> GetMappingJsonAsync(string commitSha, string filePath, CancellationToken cancellationToken)
     {
+        string rawUrl = $"https://raw.githubusercontent.com/{_registryOwner}/{_registryRepo}/{commitSha}/{filePath}";
         return await _httpClient.GetFromJsonAsync<JsonElement>(rawUrl, cancellationToken: cancellationToken);
     }
-
-    public string GetRawFileLink(string commitSha, string filePath)
-    {
-        return $"https://raw.githubusercontent.com/{_registryOwner}/{_registryRepo}/{commitSha}/{filePath}";
-    }
-
-
-
 
 }

@@ -6,7 +6,8 @@ using Microsoft.CodeAnalysis;
 
 namespace Cardano.Metadata.Modules.Handlers;
 
-public class MetadataHandler(
+public class MetadataHandler
+(
     IDbContextFactory<MetadataDbContext> _dbContextFactory
 )
 {

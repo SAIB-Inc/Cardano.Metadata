@@ -6,6 +6,7 @@ using Cardano.Metadata.Modules.Handlers;
 using System.Net.Http.Headers;
 using System.Reflection;
 using Cardano.Metadata.Services;
+using Cardano.Metadata.Workers;
 
 var builder = WebApplication.CreateBuilder(args);
 
