@@ -73,7 +73,7 @@ public class MetadataDbService
 
     public async Task<TokenMetadata?> AddTokenAsync(JsonElement mappingJson, CancellationToken cancellationToken)
     {
-        var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         var registryItem = DeserializeJson(mappingJson);
 
@@ -115,7 +115,7 @@ public class MetadataDbService
 
     public async Task<SyncState?> GetSyncStateAsync(CancellationToken cancellationToken)
     {
-        var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await dbContext.SyncState
             .OrderByDescending(ss => ss.Date)
             .FirstOrDefaultAsync(cancellationToken);
@@ -123,7 +123,7 @@ public class MetadataDbService
 
     public async Task AddOrUpdateSyncStateAsync(GitCommit latestCommit, CancellationToken cancellationToken)
     {
-        var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var syncState = await dbContext.SyncState.FirstOrDefaultAsync(cancellationToken);
 
         var newSha = latestCommit.Sha ?? string.Empty;
