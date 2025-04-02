@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Cardano.Metadata.Migrations
 {
     [DbContext(typeof(MetadataDbContext))]
-    [Migration("20250320143205_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20250401161739_InitialMigrate")]
+    partial class InitialMigrate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -25,7 +25,20 @@ namespace Cardano.Metadata.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("Cardano.Metadata.Models.Entity.MetaData", b =>
+            modelBuilder.Entity("Cardano.Metadata.Models.Entity.SyncState", b =>
+                {
+                    b.Property<string>("Hash")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("Date")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Hash");
+
+                    b.ToTable("SyncState");
+                });
+
+            modelBuilder.Entity("Cardano.Metadata.Models.Entity.TokenMetadata", b =>
                 {
                     b.Property<string>("Subject")
                         .HasColumnType("text");
@@ -59,20 +72,7 @@ namespace Cardano.Metadata.Migrations
                     b.HasIndex("Name", "Description", "Ticker")
                         .HasDatabaseName("IX_TokenMetadata_Name_Description_Ticker");
 
-                    b.ToTable("MetaData");
-                });
-
-            modelBuilder.Entity("Cardano.Metadata.Models.Entity.SyncState", b =>
-                {
-                    b.Property<string>("Sha")
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("Date")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Sha");
-
-                    b.ToTable("SyncState");
+                    b.ToTable("TokenMetadata");
                 });
 #pragma warning restore 612, 618
         }

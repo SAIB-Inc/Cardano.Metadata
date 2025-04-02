@@ -1,6 +1,6 @@
 namespace Cardano.Metadata.Models.Entity;
 
 public record SyncState(
-    string Sha,
+    string Hash,
     DateTimeOffset Date
 );

@@ -1,6 +1,5 @@
 namespace Cardano.Metadata.Models.Entity;
-
-public record MetaData(
+public record TokenMetadata(
     string Subject,
     string Name,
     string Ticker,
