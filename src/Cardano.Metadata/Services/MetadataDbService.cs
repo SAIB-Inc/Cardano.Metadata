@@ -12,69 +12,11 @@ public class MetadataDbService
     ILogger<MetadataDbService> logger,
     IDbContextFactory<MetadataDbContext> _dbContextFactory)
 {
-    public RegistryItem? DeserializeJson(JsonElement mappingJson)
-    {
-        Dictionary<string, JsonElement> registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
-                           ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
 
-        string? subject = registryItem.TryGetValue("subject", out JsonElement subjectElement)
-            ? subjectElement.GetString()
-            : null;
 
-        string? name = registryItem.TryGetValue("name", out JsonElement nameElement)
-            ? nameElement.GetProperty("value").GetString()
-            : null;
-
-        string? ticker = registryItem.TryGetValue("ticker", out JsonElement tickerElement)
-            ? tickerElement.GetProperty("value").GetString()
-            : null;
-
-        string? description = registryItem.TryGetValue("description", out JsonElement descriptionElement)
-            ? descriptionElement.GetProperty("value").GetString()
-            : null;
-
-        string? policy = registryItem.TryGetValue("policy", out JsonElement policyElement)
-            ? policyElement.GetString()
-            : null;
-
-        string? url = registryItem.TryGetValue("url", out JsonElement urlElement)
-            ? urlElement.GetProperty("value").GetString()
-            : null;
-
-        string? logo = registryItem.TryGetValue("logo", out JsonElement logoElement)
-            ? logoElement.GetProperty("value").GetString()
-            : null;
-
-        int decimals = registryItem.TryGetValue("decimals", out JsonElement decimalsElement)
-            ? decimalsElement.GetProperty("value").GetInt32()
-            : 0;
-
-        if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(name) || string.IsNullOrEmpty(ticker))
-        {
-            logger.LogWarning("Invalid token data. Subject, Name, and Ticker cannot be null or empty.");
-            return null;
-        }
-
-        RegistryItem result = new RegistryItem
-        {
-            Subject = subject,
-            Policy = policy,
-            Name = new ValueResponse<string> { Value = name },
-            Ticker = new ValueResponse<string> { Value = ticker },
-            Description = new ValueResponse<string> { Value = description },
-            Url = new ValueResponse<string> { Value = url },
-            Logo = new ValueResponse<string> { Value = logo },
-            Decimals = new ValueResponse<int> { Value = decimals }
-        };
-
-        return result;
-    }
-
-    public async Task<TokenMetadata?> AddTokenAsync(JsonElement mappingJson, CancellationToken cancellationToken)
+    public async Task<TokenMetadata?> AddTokenAsync(RegistryItem registryItem, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-        RegistryItem? registryItem = DeserializeJson(mappingJson);
 
         if (registryItem == null ||
             string.IsNullOrEmpty(registryItem.Subject) ||
