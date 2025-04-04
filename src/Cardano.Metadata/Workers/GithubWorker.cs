@@ -54,6 +54,61 @@ public class GithubWorker
             }
             await metadataDbService.UpsertSyncStateAsync(latestCommit, stoppingToken);
         }
+        else
+        {
+            List<GitCommit> latestCommitsSince = [];
+            int page = 1;
+            while (true)
+            {
+                IEnumerable<GitCommit>? commitPage = await githubService.GetCommitPageAsync(syncState.Date, page, stoppingToken);
+                if (commitPage is null || !commitPage.Any())
+                    break;
+                latestCommitsSince.AddRange(commitPage);
+                page++;
+            }
+            foreach (GitCommit commit in latestCommitsSince)
+            {
+                if (string.IsNullOrEmpty(commit.Url))
+                    continue;
+
+                GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
+                if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null)
+                    continue;
+
+                foreach (GitCommitFile file in resolvedCommit.Files)
+                {
+                    if (file.Filename is not null)
+                    {
+                        string subject = file.Filename.Replace("mappings/", string.Empty).Replace(".json", string.Empty);
+
+                        try
+                        {
+                            JsonElement mappingJson = await githubService.GetMappingJsonAsync(resolvedCommit.Sha, file.Filename, stoppingToken);
+                            RegistryItem? registryItem = MapRegistryItem(mappingJson);
+                            if (registryItem is null)
+                                continue;
+
+                            bool exists = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
+                            if (exists)
+                            {
+                                await metadataDbService.UpdateTokenAsync(registryItem, stoppingToken);
+                            }
+                            else
+                            {
+                                await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
+                            }
+                        }
+                        catch
+                        {
+                            logger.LogError("Error processing metadata for subject {Subject}", subject);
+                            await metadataDbService.DeleteMissingMetadataAsync(subject, stoppingToken);
+                        }
+                    }
+                }
+                await metadataDbService.UpsertSyncStateAsync(resolvedCommit, stoppingToken);
+            }
+        }
+
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
     }
 
@@ -114,5 +169,6 @@ public class GithubWorker
 
         return result;
     }
+
 
 }

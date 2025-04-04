@@ -45,7 +45,7 @@ public class MetadataDbService
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await dbContext.SyncState
-            .OrderByDescending((SyncState ss) => ss.Date)
+            .OrderByDescending(ss => ss.Date)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -80,4 +80,59 @@ public class MetadataDbService
         return await dbContext.TokenMetadata
             .AnyAsync(t => t.Subject == subject, cancellationToken);
     }
+    public async Task DeleteMissingMetadataAsync(string subject, CancellationToken cancellationToken)
+    {
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        TokenMetadata? existingMetadata = await dbContext.TokenMetadata
+            .Where(tm => tm.Subject.Equals(subject, StringComparison.CurrentCultureIgnoreCase))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingMetadata is not null)
+        {
+            dbContext.TokenMetadata.Remove(existingMetadata);
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+
+    public async Task<TokenMetadata?> UpdateTokenAsync(RegistryItem registryItem, CancellationToken cancellationToken)
+    {
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        TokenMetadata? existingMetadata = await dbContext.TokenMetadata
+            .FirstOrDefaultAsync(t => t.Subject == registryItem.Subject, cancellationToken);
+
+        if (existingMetadata is null)
+        {
+            logger.LogWarning("Token metadata not found for subject {Subject}", registryItem.Subject);
+            return null;
+        }
+
+        if (registryItem.Name == null || string.IsNullOrEmpty(registryItem.Name.Value) ||
+           registryItem.Ticker == null || string.IsNullOrEmpty(registryItem.Ticker.Value) ||
+           registryItem.Decimals == null || registryItem.Decimals.Value < 0)
+        {
+            logger.LogWarning("Invalid token data. Name, Ticker, Subject or Decimals cannot be null or empty.");
+            return null;
+        }
+
+
+        TokenMetadata updatedMetadata = existingMetadata with
+        {
+            Name = registryItem.Name.Value,
+            Ticker = registryItem.Ticker.Value,
+            Decimals = registryItem.Decimals.Value,
+            Policy = registryItem.Policy,
+            Url = registryItem.Url?.Value,
+            Logo = registryItem.Logo?.Value,
+            Description = registryItem.Description?.Value
+        };
+
+        dbContext.TokenMetadata.Update(updatedMetadata);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return updatedMetadata;
+    }
+
+
 }
