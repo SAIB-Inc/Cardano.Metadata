@@ -100,7 +100,7 @@ public class GithubWorker
             return null;
         }
 
-        RegistryItem result = new RegistryItem
+        RegistryItem result = new()
         {
             Subject = subject,
             Policy = policy,

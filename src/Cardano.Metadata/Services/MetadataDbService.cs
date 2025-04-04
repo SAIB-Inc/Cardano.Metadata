@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Cardano.Metadata.Models.Entity;
 using Cardano.Metadata.Models.Response;
 using Cardano.Metadata.Data;
@@ -12,14 +11,11 @@ public class MetadataDbService
     ILogger<MetadataDbService> logger,
     IDbContextFactory<MetadataDbContext> _dbContextFactory)
 {
-
-
     public async Task<TokenMetadata?> AddTokenAsync(RegistryItem registryItem, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        if (registryItem == null ||
-            string.IsNullOrEmpty(registryItem.Subject) ||
+        if (string.IsNullOrEmpty(registryItem.Subject) ||
             registryItem.Name == null || string.IsNullOrEmpty(registryItem.Name.Value) ||
             registryItem.Ticker == null || string.IsNullOrEmpty(registryItem.Ticker.Value) ||
             registryItem.Decimals == null || registryItem.Decimals.Value < 0)
@@ -28,7 +24,7 @@ public class MetadataDbService
             return null;
         }
 
-        TokenMetadata token = new TokenMetadata(
+        TokenMetadata token = new(
             registryItem.Subject,
             registryItem.Name.Value,
             registryItem.Ticker.Value,
