@@ -46,7 +46,7 @@ public class GithubWorker
                     if (exist) continue;
 
                     JsonElement mappingJson = await githubService.GetMappingJsonAsync(latestCommit.Sha, item.Path, stoppingToken);
-                    RegistryItem? registryItem = DeserializeJson(mappingJson);
+                    RegistryItem? registryItem = MapRegistryItem(mappingJson);
 
                     if (registryItem == null) continue;
                     await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
@@ -57,7 +57,7 @@ public class GithubWorker
         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
     }
 
-    public RegistryItem? DeserializeJson(JsonElement mappingJson)
+    public RegistryItem? MapRegistryItem(JsonElement mappingJson)
     {
         Dictionary<string, JsonElement> registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
                            ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
