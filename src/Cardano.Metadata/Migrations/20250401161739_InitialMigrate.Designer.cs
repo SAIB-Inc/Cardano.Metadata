@@ -26,54 +26,57 @@ namespace Cardano.Metadata.Migrations
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
             modelBuilder.Entity("Cardano.Metadata.Models.Entity.SyncState", b =>
-                {
-                    b.Property<string>("Hash")
-                        .HasColumnType("text");
+            {
+                b.Property<string>("Hash")
+                    .HasColumnType("text");
 
-                    b.Property<DateTimeOffset>("Date")
-                        .HasColumnType("timestamp with time zone");
+                b.Property<DateTimeOffset>("Date")
+                    .HasColumnType("timestamp with time zone");
 
-                    b.HasKey("Hash");
+                b.HasKey("Hash");
 
-                    b.ToTable("SyncState");
-                });
+                b.ToTable("SyncState");
+            });
 
             modelBuilder.Entity("Cardano.Metadata.Models.Entity.TokenMetadata", b =>
-                {
-                    b.Property<string>("Subject")
-                        .HasColumnType("text");
+            {
+                b.Property<string>("Subject")
+                    .HasColumnType("text");
 
-                    b.Property<int>("Decimals")
-                        .HasColumnType("integer");
+                b.Property<int>("Decimals")
+                    .HasColumnType("integer");
 
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
+                b.Property<string>("Description")
+                    .HasColumnType("text");
 
-                    b.Property<string>("Logo")
-                        .HasColumnType("text");
+                b.Property<string>("Logo")
+                    .HasColumnType("text");
 
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
+                b.Property<string>("Name")
+                    .IsRequired()
+                    .HasColumnType("text");
 
-                    b.Property<string>("Policy")
-                        .IsRequired()
-                        .HasColumnType("text");
+                b.Property<string>("Policy")
+                    .HasColumnType("text");
 
-                    b.Property<string>("Ticker")
-                        .IsRequired()
-                        .HasColumnType("text");
+                b.Property<string>("PolicyId")
+                    .IsRequired()
+                    .HasColumnType("text");
 
-                    b.Property<string>("Url")
-                        .HasColumnType("text");
+                b.Property<string>("Ticker")
+                    .IsRequired()
+                    .HasColumnType("text");
 
-                    b.HasKey("Subject");
+                b.Property<string>("Url")
+                    .HasColumnType("text");
 
-                    b.HasIndex("Name", "Description", "Ticker")
-                        .HasDatabaseName("IX_TokenMetadata_Name_Description_Ticker");
+                b.HasKey("Subject");
 
-                    b.ToTable("TokenMetadata");
-                });
+                b.HasIndex("Name", "Description", "Ticker")
+                    .HasDatabaseName("IX_TokenMetadata_Name_Description_Ticker");
+
+                b.ToTable("TokenMetadata");
+            });
 #pragma warning restore 612, 618
         }
     }
