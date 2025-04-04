@@ -14,41 +14,40 @@ public class MetadataDbService
 {
     public RegistryItem? DeserializeJson(JsonElement mappingJson)
     {
-        var registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
+        Dictionary<string, JsonElement> registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
                            ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
 
-        var subject = registryItem.TryGetValue("subject", out JsonElement subjectElement)
+        string? subject = registryItem.TryGetValue("subject", out JsonElement subjectElement)
             ? subjectElement.GetString()
             : null;
 
-        var name = registryItem.TryGetValue("name", out JsonElement nameElement)
+        string? name = registryItem.TryGetValue("name", out JsonElement nameElement)
             ? nameElement.GetProperty("value").GetString()
             : null;
 
-        var ticker = registryItem.TryGetValue("ticker", out JsonElement tickerElement)
+        string? ticker = registryItem.TryGetValue("ticker", out JsonElement tickerElement)
             ? tickerElement.GetProperty("value").GetString()
             : null;
 
-        var description = registryItem.TryGetValue("description", out JsonElement descriptionElement)
+        string? description = registryItem.TryGetValue("description", out JsonElement descriptionElement)
             ? descriptionElement.GetProperty("value").GetString()
             : null;
 
-        var policy = registryItem.TryGetValue("policy", out JsonElement policyElement)
+        string? policy = registryItem.TryGetValue("policy", out JsonElement policyElement)
             ? policyElement.GetString()
             : null;
 
-        var url = registryItem.TryGetValue("url", out JsonElement urlElement)
+        string? url = registryItem.TryGetValue("url", out JsonElement urlElement)
             ? urlElement.GetProperty("value").GetString()
             : null;
 
-        var logo = registryItem.TryGetValue("logo", out JsonElement logoElement)
+        string? logo = registryItem.TryGetValue("logo", out JsonElement logoElement)
             ? logoElement.GetProperty("value").GetString()
             : null;
 
-        var decimals = registryItem.TryGetValue("decimals", out JsonElement decimalsElement)
+        int decimals = registryItem.TryGetValue("decimals", out JsonElement decimalsElement)
             ? decimalsElement.GetProperty("value").GetInt32()
             : 0;
-
 
         if (string.IsNullOrEmpty(subject) || string.IsNullOrEmpty(name) || string.IsNullOrEmpty(ticker))
         {
@@ -56,7 +55,7 @@ public class MetadataDbService
             return null;
         }
 
-        var result = new RegistryItem
+        RegistryItem result = new RegistryItem
         {
             Subject = subject,
             Policy = policy,
@@ -73,9 +72,9 @@ public class MetadataDbService
 
     public async Task<TokenMetadata?> AddTokenAsync(JsonElement mappingJson, CancellationToken cancellationToken)
     {
-        using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var registryItem = DeserializeJson(mappingJson);
+        RegistryItem? registryItem = DeserializeJson(mappingJson);
 
         if (registryItem == null ||
             string.IsNullOrEmpty(registryItem.Subject) ||
@@ -87,16 +86,7 @@ public class MetadataDbService
             return null;
         }
 
-        bool exists = await dbContext.TokenMetadata
-        .AnyAsync(t => t.Subject == registryItem.Subject, cancellationToken);
-
-        if (exists)
-        {
-            logger.LogWarning("Token with subject {Subject} already exists.", registryItem.Subject);
-            return null;
-        }
-
-        var token = new TokenMetadata(
+        TokenMetadata token = new TokenMetadata(
             registryItem.Subject,
             registryItem.Name.Value,
             registryItem.Ticker.Value,
@@ -115,19 +105,19 @@ public class MetadataDbService
 
     public async Task<SyncState?> GetSyncStateAsync(CancellationToken cancellationToken)
     {
-        using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await dbContext.SyncState
-            .OrderByDescending(ss => ss.Date)
+            .OrderByDescending((SyncState ss) => ss.Date)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task AddOrUpdateSyncStateAsync(GitCommit latestCommit, CancellationToken cancellationToken)
+    public async Task UpsertSyncStateAsync(GitCommit latestCommit, CancellationToken cancellationToken)
     {
-        using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var syncState = await dbContext.SyncState.FirstOrDefaultAsync(cancellationToken);
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        SyncState? syncState = await dbContext.SyncState.FirstOrDefaultAsync(cancellationToken);
 
-        var newSha = latestCommit.Sha ?? string.Empty;
-        var newDate = latestCommit.Commit?.Author?.Date ?? DateTimeOffset.UtcNow;
+        string newSha = latestCommit.Sha ?? string.Empty;
+        DateTimeOffset newDate = latestCommit.Commit?.Author?.Date ?? DateTimeOffset.UtcNow;
 
         if (syncState is null)
         {
@@ -137,12 +127,19 @@ public class MetadataDbService
         }
         else
         {
-            var updatedSyncState = syncState with { Hash = newSha, Date = newDate };
+            SyncState updatedSyncState = syncState with { Hash = newSha, Date = newDate };
 
             dbContext.Entry(syncState).CurrentValues.SetValues(updatedSyncState);
             logger.LogInformation("Sync state updated.");
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<bool> SubjectExistsAsync(string subject, CancellationToken cancellationToken)
+    {
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await dbContext.TokenMetadata
+            .AnyAsync(t => t.Subject == subject, cancellationToken);
     }
 }

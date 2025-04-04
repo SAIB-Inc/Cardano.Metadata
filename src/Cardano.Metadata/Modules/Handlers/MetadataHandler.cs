@@ -14,8 +14,8 @@ public class MetadataHandler
     // Fetch data by subject
     public async Task<IResult> GetTokenMetadataAsync(string subject)
     {
-        using var db = await _dbContextFactory.CreateDbContextAsync();
-        var token = await db.TokenMetadata
+        using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync();
+        TokenMetadata? token = await db.TokenMetadata
             .AsNoTracking()
             .FirstOrDefaultAsync(t => t.Subject == subject);
 
@@ -45,9 +45,10 @@ public class MetadataHandler
         bool requireLogo = !(includeEmptyLogo ?? false);
         bool requireTicker = !(includeEmptyTicker ?? false);
 
-        using var db = await _dbContextFactory.CreateDbContextAsync();
-        var distinctSubjects = subjects.Distinct().ToList();
-        var predicate = PredicateBuilder.New<TokenMetadata>(false);
+        using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync();
+        List<string> distinctSubjects = subjects.Distinct().ToList();
+
+        ExpressionStarter<TokenMetadata> predicate = PredicateBuilder.New<TokenMetadata>(false);
 
         predicate = predicate.Or(token => distinctSubjects.Contains(token.Subject));
 
@@ -55,7 +56,7 @@ public class MetadataHandler
         {
             predicate = predicate.And(token =>
                 token.Subject.Substring(0, 56)
-                    .Equals(policyId, StringComparison.OrdinalIgnoreCase));
+                    .Equals(policyId, System.StringComparison.OrdinalIgnoreCase));
         }
         if (requireName)
             predicate = predicate.And(token => !string.IsNullOrEmpty(token.Name));
@@ -87,12 +88,11 @@ public class MetadataHandler
             query = query.Skip(effectiveOffset).Take(limit.Value);
         }
 
-        var tokenList = await query.ToListAsync();
+        List<TokenMetadata> tokenList = await query.ToListAsync();
 
         if (tokenList.Count == 0)
             return Results.NotFound("No tokens found for the given subjects.");
 
         return Results.Ok(new { total, data = tokenList });
     }
-
 }
