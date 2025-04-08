@@ -80,7 +80,7 @@ public class MetadataDbService
         return await dbContext.TokenMetadata
             .AnyAsync(t => t.Subject == subject, cancellationToken);
     }
-    public async Task DeleteMissingMetadataAsync(string subject, CancellationToken cancellationToken)
+    public async Task DeleteTokenAsync(string subject, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 

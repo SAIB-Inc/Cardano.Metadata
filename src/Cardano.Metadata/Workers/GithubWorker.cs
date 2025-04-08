@@ -68,12 +68,10 @@ public class GithubWorker
             }
             foreach (GitCommit commit in latestCommitsSince)
             {
-                if (string.IsNullOrEmpty(commit.Url))
-                    continue;
+                if (string.IsNullOrEmpty(commit.Url)) continue;
 
                 GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
-                if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null)
-                    continue;
+                if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null) continue;
 
                 foreach (GitCommitFile file in resolvedCommit.Files)
                 {
@@ -85,8 +83,7 @@ public class GithubWorker
                         {
                             JsonElement mappingJson = await githubService.GetMappingJsonAsync(resolvedCommit.Sha, file.Filename, stoppingToken);
                             RegistryItem? registryItem = MapRegistryItem(mappingJson);
-                            if (registryItem is null)
-                                continue;
+                            if (registryItem is null) continue;
 
                             bool exists = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
                             if (exists)
@@ -101,7 +98,7 @@ public class GithubWorker
                         catch
                         {
                             logger.LogError("Error processing metadata for subject {Subject}", subject);
-                            await metadataDbService.DeleteMissingMetadataAsync(subject, stoppingToken);
+                            await metadataDbService.DeleteTokenAsync(subject, stoppingToken);
                         }
                     }
                 }
