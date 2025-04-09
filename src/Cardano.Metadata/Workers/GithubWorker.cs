@@ -13,105 +13,108 @@ public class GithubWorker
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            logger.LogInformation("Syncing Mappings");
-
-            SyncState? syncState = await metadataDbService.GetSyncStateAsync(stoppingToken);
-
-            if (syncState is null)
+            try
             {
-                logger.LogWarning("No Sync State Information, syncing all mappings...");
-                GitCommit? latestCommit = await githubService.GetCommitsAsync(stoppingToken);
+                logger.LogInformation("Syncing Mappings");
 
-                if (latestCommit == null || string.IsNullOrEmpty(latestCommit.Sha))
-                {
-                    logger.LogError("Commit SHA is null or empty for the latest commit.");
-                    return;
-                }
-                GitTreeResponse treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
+                SyncState? syncState = await metadataDbService.GetSyncStateAsync(stoppingToken);
 
-                if (treeResponse == null || treeResponse.Tree == null)
+                if (syncState is null)
                 {
-                    logger.LogError("Tree response is null.");
-                    return;
-                }
-                foreach (GitTreeItem item in treeResponse.Tree)
-                {
-                    if (item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
+                    logger.LogWarning("No Sync State Information, syncing all mappings...");
+                    GitCommit? latestCommit = await githubService.GetCommitsAsync(stoppingToken);
+
+                    if (latestCommit == null || string.IsNullOrEmpty(latestCommit.Sha))
                     {
-                        string subject = item.Path
-                                        .Replace("mappings/", string.Empty)
-                                        .Replace(".json", string.Empty);
-
-                        bool exist = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
-                        if (exist) continue;
-
-                        JsonElement mappingJson = await githubService.GetMappingJsonAsync(latestCommit.Sha, item.Path, stoppingToken);
-                        RegistryItem? registryItem = MapRegistryItem(mappingJson);
-
-                        if (registryItem == null) continue;
-                        await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
+                        logger.LogError("Commit SHA is null or empty for the latest commit.");
+                        break;
                     }
-                }
-                await metadataDbService.UpsertSyncStateAsync(latestCommit, stoppingToken);
-            }
-            else
-            {
-                List<GitCommit> latestCommitsSince = await GetLatestCommitsSinceAsync(syncState.Date, stoppingToken);
-                foreach (GitCommit commit in latestCommitsSince)
-                {
-                    if (string.IsNullOrEmpty(commit.Url)) continue;
+                    GitTreeResponse treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
 
-                    GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
-                    if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null) continue;
-
-                    foreach (GitCommitFile file in resolvedCommit.Files)
+                    if (treeResponse == null || treeResponse.Tree == null)
                     {
-                        if (file.Filename is not null)
+                        logger.LogError("Tree response is null.");
+                        break;
+                    }
+                    foreach (GitTreeItem item in treeResponse.Tree)
+                    {
+                        if (item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
                         {
-                            string subject = file.Filename.Replace("mappings/", string.Empty).Replace(".json", string.Empty);
+                            string subject = item.Path
+                                            .Replace("mappings/", string.Empty)
+                                            .Replace(".json", string.Empty);
 
-                            try
-                            {
-                                JsonElement mappingJson = await githubService.GetMappingJsonAsync(resolvedCommit.Sha, file.Filename, stoppingToken);
-                                RegistryItem? registryItem = MapRegistryItem(mappingJson);
-                                if (registryItem is null) continue;
+                            bool exist = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
+                            if (exist) continue;
 
-                                bool exists = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
-                                if (exists)
-                                {
-                                    await metadataDbService.UpdateTokenAsync(registryItem, stoppingToken);
-                                }
-                                else
-                                {
-                                    await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
-                                }
-                            }
-                            catch
-                            {
-                                logger.LogError("Error processing metadata for subject {Subject}", subject);
-                                await metadataDbService.DeleteTokenAsync(subject, stoppingToken);
-                            }
+                            JsonElement mappingJson = await githubService.GetMappingJsonAsync(latestCommit.Sha, item.Path, stoppingToken);
+                            RegistryItem? registryItem = MapRegistryItem(mappingJson);
+
+                            if (registryItem == null) continue;
+                            await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
                         }
                     }
-                    await metadataDbService.UpsertSyncStateAsync(resolvedCommit, stoppingToken);
+                    await metadataDbService.UpsertSyncStateAsync(latestCommit, stoppingToken);
                 }
-            }
+                else
+                {
+                    List<GitCommit> latestCommitsSince = await GetLatestCommitsSinceAsync(syncState.Date, stoppingToken);
+                    foreach (GitCommit commit in latestCommitsSince)
+                    {
+                        if (string.IsNullOrEmpty(commit.Url)) continue;
 
-            await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "An error occurred while syncing mappings.");
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                        GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
+                        if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null) continue;
+
+                        foreach (GitCommitFile file in resolvedCommit.Files)
+                        {
+                            if (file.Filename is not null)
+                            {
+                                string subject = file.Filename.Replace("mappings/", string.Empty).Replace(".json", string.Empty);
+
+                                try
+                                {
+                                    JsonElement mappingJson = await githubService.GetMappingJsonAsync(resolvedCommit.Sha, file.Filename, stoppingToken);
+                                    RegistryItem? registryItem = MapRegistryItem(mappingJson);
+                                    if (registryItem is null) continue;
+
+                                    bool exists = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
+                                    if (exists)
+                                    {
+                                        await metadataDbService.UpdateTokenAsync(registryItem, stoppingToken);
+                                    }
+                                    else
+                                    {
+                                        await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
+                                    }
+                                }
+                                catch
+                                {
+                                    logger.LogError("Error processing metadata for subject {Subject}", subject);
+                                    await metadataDbService.DeleteTokenAsync(subject, stoppingToken);
+                                }
+                            }
+                        }
+                        await metadataDbService.UpsertSyncStateAsync(resolvedCommit, stoppingToken);
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An error occurred while syncing mappings.");
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            }
         }
     }
 
     public RegistryItem? MapRegistryItem(JsonElement mappingJson)
     {
         Dictionary<string, JsonElement> registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
-                           ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
+                        ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
 
         string? subject = registryItem.TryGetValue("subject", out JsonElement subjectElement)
             ? subjectElement.GetString()

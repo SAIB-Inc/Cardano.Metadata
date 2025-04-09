@@ -52,25 +52,27 @@ public class MetadataDbService
     public async Task UpsertSyncStateAsync(GitCommit latestCommit, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        SyncState? syncState = await dbContext.SyncState.FirstOrDefaultAsync(cancellationToken);
 
         string newSha = latestCommit.Sha ?? string.Empty;
         DateTimeOffset newDate = latestCommit.Commit?.Author?.Date ?? DateTimeOffset.UtcNow;
 
-        if (syncState is null)
+        SyncState? existingSyncState = await dbContext.SyncState
+        .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingSyncState is null)
         {
-            syncState = new SyncState(newSha, newDate);
+            var syncState = new SyncState(newSha, newDate);
             await dbContext.SyncState.AddAsync(syncState, cancellationToken);
             logger.LogInformation("Sync state created.");
         }
         else
         {
-            SyncState updatedSyncState = syncState with { Hash = newSha, Date = newDate };
+            var syncState = new SyncState(newSha, newDate);
+            dbContext.SyncState.Remove(existingSyncState);
 
-            dbContext.Entry(syncState).CurrentValues.SetValues(updatedSyncState);
+            await dbContext.SyncState.AddAsync(syncState, cancellationToken);
             logger.LogInformation("Sync state updated.");
         }
-
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -85,22 +87,22 @@ public class MetadataDbService
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         TokenMetadata? existingMetadata = await dbContext.TokenMetadata
-            .Where(tm => tm.Subject.Equals(subject, StringComparison.CurrentCultureIgnoreCase))
+            .Where(tm => tm.Subject == subject)
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (existingMetadata is not null)
+        if (existingMetadata != null)
         {
             dbContext.TokenMetadata.Remove(existingMetadata);
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
-        await dbContext.SaveChangesAsync(cancellationToken);
     }
-
-
+    
     public async Task<TokenMetadata?> UpdateTokenAsync(RegistryItem registryItem, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         TokenMetadata? existingMetadata = await dbContext.TokenMetadata
+            .AsNoTracking()
             .FirstOrDefaultAsync(t => t.Subject == registryItem.Subject, cancellationToken);
 
         if (existingMetadata is null)
@@ -117,7 +119,6 @@ public class MetadataDbService
             return null;
         }
 
-
         TokenMetadata updatedMetadata = existingMetadata with
         {
             Name = registryItem.Name.Value,
@@ -133,6 +134,4 @@ public class MetadataDbService
         await dbContext.SaveChangesAsync(cancellationToken);
         return updatedMetadata;
     }
-
-
 }
