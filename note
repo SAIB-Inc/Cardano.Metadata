@@ -1,2 +1,0 @@
-// "DefaultConnection": "Host=localhost;Port=5434;Username=easyuser;Password=easypassword;Database=easydb"
-      "DefaultConnection": "Host=localhost;Port=5434;Username=secureuser;Password=S3cur3P@ssw0rd!;Database=securedb"
