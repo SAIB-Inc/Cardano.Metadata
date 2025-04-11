@@ -31,7 +31,7 @@ public class GithubWorker
                         logger.LogError("Commit SHA is null or empty for the latest commit.");
                         break;
                     }
-                    GitTreeResponse treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
+                    GitTreeResponse? treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
 
                     if (treeResponse == null || treeResponse.Tree == null)
                     {

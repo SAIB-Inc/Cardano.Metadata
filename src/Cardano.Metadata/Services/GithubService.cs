@@ -19,10 +19,10 @@ public class GithubService
         return commits?.FirstOrDefault();
     }
 
-    public async Task<GitTreeResponse> GetGitTreeAsync(string commitSha, CancellationToken cancellationToken)
+    public async Task<GitTreeResponse?> GetGitTreeAsync(string commitSha, CancellationToken cancellationToken)
     {
         string treeUrl = $"https://api.github.com/repos/{_registryOwner}/{_registryRepo}/git/trees/{commitSha}?recursive=true";
-        GitTreeResponse? gitTreeResponse = await _httpClient.GetFromJsonAsync<GitTreeResponse>(treeUrl, cancellationToken) ?? throw new InvalidOperationException("GitTreeResponse is null.");
+        GitTreeResponse? gitTreeResponse = await _httpClient.GetFromJsonAsync<GitTreeResponse>(treeUrl, cancellationToken);
         return gitTreeResponse;
     }
 
