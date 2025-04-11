@@ -13,9 +13,9 @@ public class GithubWorker
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
                 logger.LogInformation("Syncing Mappings");
 
@@ -28,15 +28,13 @@ public class GithubWorker
 
                     if (latestCommit == null || string.IsNullOrEmpty(latestCommit.Sha))
                     {
-                        logger.LogError("Commit SHA is null or empty for the latest commit.");
-                        break;
+                        throw new Exception("Commit SHA is null or empty for the latest commit.");
                     }
                     GitTreeResponse? treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
 
                     if (treeResponse == null || treeResponse.Tree == null)
                     {
-                        logger.LogError("Tree response is null.");
-                        break;
+                        throw new Exception("Tree response is null.");
                     }
                     foreach (GitTreeItem item in treeResponse.Tree)
                     {
@@ -103,11 +101,11 @@ public class GithubWorker
 
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "An error occurred while syncing mappings.");
-                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
-            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An error occurred while syncing mappings.");
+            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
         }
     }
 
