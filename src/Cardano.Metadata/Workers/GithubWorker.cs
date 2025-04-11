@@ -13,9 +13,9 @@ public class GithubWorker
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            try
             {
                 logger.LogInformation("Syncing Mappings");
 
@@ -101,11 +101,11 @@ public class GithubWorker
 
                 await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "An error occurred while syncing mappings.");
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An error occurred while syncing mappings.");
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            }
         }
     }
 
