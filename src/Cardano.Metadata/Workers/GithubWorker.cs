@@ -28,13 +28,15 @@ public class GithubWorker
 
                     if (latestCommit == null || string.IsNullOrEmpty(latestCommit.Sha))
                     {
-                        throw new Exception("Commit SHA is null or empty for the latest commit.");
+                        logger.LogError("Commit SHA is null or empty for the latest commit.");
+                        break;
                     }
                     GitTreeResponse? treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
 
                     if (treeResponse == null || treeResponse.Tree == null)
                     {
-                        throw new Exception("Tree response is null.");
+                        logger.LogError("Tree response is null");
+                        break;
                     }
                     foreach (GitTreeItem item in treeResponse.Tree)
                     {
