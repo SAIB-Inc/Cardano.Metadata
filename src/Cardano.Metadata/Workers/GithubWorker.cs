@@ -13,54 +13,108 @@ public class GithubWorker
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Syncing Mappings");
-
-        SyncState? syncState = await metadataDbService.GetSyncStateAsync(stoppingToken);
-
-        if (syncState is null)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            logger.LogWarning("No Sync State Information, syncing all mappings...");
-            GitCommit? latestCommit = await githubService.GetCommitsAsync(stoppingToken);
+            try
+            {
+                logger.LogInformation("Syncing Mappings");
 
-            if (latestCommit == null || string.IsNullOrEmpty(latestCommit.Sha))
-            {
-                logger.LogError("Commit SHA is null or empty for the latest commit.");
-                return;
-            }
-            GitTreeResponse treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
+                SyncState? syncState = await metadataDbService.GetSyncStateAsync(stoppingToken);
 
-            if (treeResponse == null || treeResponse.Tree == null)
-            {
-                logger.LogError("Tree response is null.");
-                return;
-            }
-            foreach (GitTreeItem item in treeResponse.Tree)
-            {
-                if (item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
+                if (syncState is null)
                 {
-                    string subject = item.Path
-                                    .Replace("mappings/", string.Empty)
-                                    .Replace(".json", string.Empty);
+                    logger.LogWarning("No Sync State Information, syncing all mappings...");
+                    GitCommit? latestCommit = await githubService.GetCommitsAsync(stoppingToken);
 
-                    bool exist = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
-                    if (exist) continue;
+                    if (latestCommit == null || string.IsNullOrEmpty(latestCommit.Sha))
+                    {
+                        logger.LogError("Commit SHA is null or empty for the latest commit.");
+                        break;
+                    }
+                    GitTreeResponse? treeResponse = await githubService.GetGitTreeAsync(latestCommit.Sha, stoppingToken);
 
-                    JsonElement mappingJson = await githubService.GetMappingJsonAsync(latestCommit.Sha, item.Path, stoppingToken);
-                    RegistryItem? registryItem = MapRegistryItem(mappingJson);
+                    if (treeResponse == null || treeResponse.Tree == null)
+                    {
+                        logger.LogError("Tree response is null");
+                        break;
+                    }
+                    foreach (GitTreeItem item in treeResponse.Tree)
+                    {
+                        if (item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
+                        {
+                            string subject = item.Path
+                                            .Replace("mappings/", string.Empty)
+                                            .Replace(".json", string.Empty);
 
-                    if (registryItem == null) continue;
-                    await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
+                            bool exist = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
+                            if (exist) continue;
+
+                            JsonElement mappingJson = await githubService.GetMappingJsonAsync(latestCommit.Sha, item.Path, stoppingToken);
+                            RegistryItem? registryItem = MapRegistryItem(mappingJson);
+
+                            if (registryItem == null) continue;
+                            await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
+                        }
+                    }
+                    await metadataDbService.UpsertSyncStateAsync(latestCommit, stoppingToken);
                 }
+                else
+                {
+                    List<GitCommit> latestCommitsSince = await GetLatestCommitsSinceAsync(syncState.Date, stoppingToken);
+                    foreach (GitCommit commit in latestCommitsSince)
+                    {
+                        if (string.IsNullOrEmpty(commit.Url)) continue;
+
+                        GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
+                        if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null) continue;
+
+                        foreach (GitCommitFile file in resolvedCommit.Files)
+                        {
+                            if (file.Filename is not null)
+                            {
+                                string subject = file.Filename.Replace("mappings/", string.Empty).Replace(".json", string.Empty);
+
+                                try
+                                {
+                                    JsonElement mappingJson = await githubService.GetMappingJsonAsync(resolvedCommit.Sha, file.Filename, stoppingToken);
+                                    RegistryItem? registryItem = MapRegistryItem(mappingJson);
+                                    if (registryItem is null) continue;
+
+                                    bool exists = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
+                                    if (exists)
+                                    {
+                                        await metadataDbService.UpdateTokenAsync(registryItem, stoppingToken);
+                                    }
+                                    else
+                                    {
+                                        await metadataDbService.AddTokenAsync(registryItem, stoppingToken);
+                                    }
+                                }
+                                catch
+                                {
+                                    logger.LogError("Error processing metadata for subject {Subject}", subject);
+                                    await metadataDbService.DeleteTokenAsync(subject, stoppingToken);
+                                }
+                            }
+                        }
+                        await metadataDbService.UpsertSyncStateAsync(resolvedCommit, stoppingToken);
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
             }
-            await metadataDbService.UpsertSyncStateAsync(latestCommit, stoppingToken);
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An error occurred while syncing mappings.");
+                await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+            }
         }
-        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
     }
 
     public RegistryItem? MapRegistryItem(JsonElement mappingJson)
     {
         Dictionary<string, JsonElement> registryItem = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(mappingJson.GetRawText())
-                           ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
+                        ?? throw new InvalidOperationException("Failed to deserialize mappingJson into a Dictionary.");
 
         string? subject = registryItem.TryGetValue("subject", out JsonElement subjectElement)
             ? subjectElement.GetString()
@@ -100,7 +154,7 @@ public class GithubWorker
             return null;
         }
 
-        RegistryItem result = new()
+        return new RegistryItem
         {
             Subject = subject,
             Policy = policy,
@@ -111,8 +165,21 @@ public class GithubWorker
             Logo = new ValueResponse<string> { Value = logo },
             Decimals = new ValueResponse<int> { Value = decimals }
         };
-
-        return result;
     }
 
+    private async Task<List<GitCommit>> GetLatestCommitsSinceAsync(DateTimeOffset lastSyncDate, CancellationToken stoppingToken)
+    {
+        List<GitCommit> latestCommitsSince = [];
+        int page = 1;
+
+        while (true)
+        {
+            IEnumerable<GitCommit>? commitPage = await githubService.GetCommitPageAsync(lastSyncDate, page, stoppingToken);
+            if (commitPage is null || !commitPage.Any()) break;
+            latestCommitsSince.AddRange(commitPage);
+            page++;
+        }
+
+        return latestCommitsSince;
+    }
 }
