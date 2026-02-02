@@ -30,10 +30,7 @@ public class BatchTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpo
             req.IncludeEmptyName,
             req.IncludeEmptyLogo,
             req.IncludeEmptyTicker);
-        
-        if (result is IResult httpResult)
-        {
-            await SendResultAsync(httpResult);
-        }
+
+        await result.ExecuteAsync(HttpContext);
     }
 }

@@ -21,10 +21,6 @@ public class GetTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpoin
     public override async Task HandleAsync(GetTokenMetadataRequest req, CancellationToken ct)
     {
         IResult result = await _metadataHandler.GetTokenMetadataAsync(req.Subject);
-        
-        if (result is IResult httpResult)
-        {
-            await SendResultAsync(httpResult);
-        }
+        await result.ExecuteAsync(HttpContext);
     }
 }

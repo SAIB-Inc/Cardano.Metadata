@@ -11,7 +11,7 @@ builder.Services.AddDbContextFactory<MetadataDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddSingleton<MetadataHandler>();
-
+builder.Services.AddOpenApi();
 builder.Services.AddFastEndpoints();
 builder.Services.SwaggerDocument(o =>
 {
@@ -22,25 +22,22 @@ builder.Services.SwaggerDocument(o =>
     };
 });
 
-builder.Services.AddOpenApi();
-
 WebApplication app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+app.MapOpenApi();
+app.UseFastEndpoints(c =>
 {
-    app.MapOpenApi();
-}
-
-app.UseFastEndpoints();
-
-app.UseSwaggerGen();
+    c.Endpoints.RoutePrefix = "api";
+    c.Versioning.Prefix = "v";
+    c.Versioning.DefaultVersion = 1;
+    c.Versioning.PrependToRoute = true;
+});
 
 app.MapScalarApiReference(options =>
-    options
-        .WithTitle("COMP API")
-        .WithTheme(ScalarTheme.Purple)
-        .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient)
-        .WithOpenApiRoutePattern("/swagger/{documentName}/swagger.json")
-);
+{
+    options.Title = "COMP API Documentation";
+    options.Theme = ScalarTheme.Default;
+    options.ShowSidebar = true;
+});
 
 app.Run();
