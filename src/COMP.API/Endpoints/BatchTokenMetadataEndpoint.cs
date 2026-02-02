@@ -1,5 +1,5 @@
 using FastEndpoints;
-using COMP.API.Modules.Handlers;
+using COMP.API.Handlers;
 using COMP.Data.Models.Request;
 
 namespace COMP.API.Endpoints;

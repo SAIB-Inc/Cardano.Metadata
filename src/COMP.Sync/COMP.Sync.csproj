@@ -12,9 +12,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\COMP.Data\COMP.Data.csproj" />
-    <ProjectReference Include="..\COMP.API\COMP.API.csproj">
-      <ExcludeAssets>contentfiles</ExcludeAssets>
-    </ProjectReference>
   </ItemGroup>
 
 </Project>

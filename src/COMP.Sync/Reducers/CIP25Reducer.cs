@@ -20,9 +20,12 @@ public partial class CIP25Reducer(
     private static readonly string[] ValidSchemes = ["https://", "http://", "ipfs://", "ar://", "data:"];
     private static readonly Regex DataUriRegex = MyRegex();
 
+    // Rollback is intentionally not implemented - this metadata indexer is append-only
+    // and doesn't track historical state. On-chain metadata updates are rare and
+    // rollbacks would require re-syncing from scratch.
     public async Task RollBackwardAsync(ulong slot)
     {
-        logger.LogWarning("Rollback requested to slot {Slot}. Manual resync may be required as we don't maintain historical state.", slot);
+        logger.LogWarning("Rollback requested to slot {Slot}. Manual resync may be required.", slot);
         await Task.CompletedTask;
     }
 
@@ -31,78 +34,61 @@ public partial class CIP25Reducer(
         List<TransactionBody> txBodies = [.. block.TransactionBodies()];
         Dictionary<int, AuxiliaryData> auxiliaryDataDict = block.AuxiliaryDataSet().ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
-        Dictionary<string, TokenMetadataOnChain> tokensWithMetadata = [];
-
-        for (int i = 0; i < txBodies.Count; i++)
-        {
-            TransactionBody tx = txBodies[i];
-            Dictionary<byte[], TokenBundleMint>? mint = tx.Mint();
-            if (mint == null || mint.Count == 0)
-                continue;
-
-            if (!auxiliaryDataDict.TryGetValue(i, out AuxiliaryData? auxData))
-                continue;
-
-            Metadata? metadata = auxData.Metadata();
-            if (metadata == null)
-                continue;
-
-            if (!metadata.Value().TryGetValue(721, out TransactionMetadatum? cip25Value))
-                continue;
-
-            if (cip25Value is not MetadatumMap rootMap)
-                continue;
-
-            foreach (KeyValuePair<byte[], TokenBundleMint> policyEntry in mint)
+        // Extract all potential tokens with CIP-25 metadata
+        List<TokenMetadataOnChain?> allTokens = [.. txBodies
+            .Select((tx, index) => (tx, index))
+            .Where(x => x.tx.Mint() is { Count: > 0 })
+            .Where(x => auxiliaryDataDict.TryGetValue(x.index, out AuxiliaryData? aux)
+                && aux.Metadata()?.Value().TryGetValue(721, out TransactionMetadatum? cip25) == true
+                && cip25 is MetadatumMap)
+            .SelectMany(x =>
             {
-                string policyId = Convert.ToHexString(policyEntry.Key).ToLowerInvariant();
-
-                foreach (KeyValuePair<byte[], long> assetEntry in policyEntry.Value.Value.Where(a => a.Value > 0))
+                MetadatumMap rootMap = (MetadatumMap)auxiliaryDataDict[x.index].Metadata()!.Value()[721];
+                return x.tx.Mint()!.SelectMany(policyEntry =>
                 {
-                    string assetNameHex = Convert.ToHexString(assetEntry.Key).ToLowerInvariant();
-                    string subject = $"{policyId}{assetNameHex}";
+                    string policyId = Convert.ToHexString(policyEntry.Key).ToLowerInvariant();
+                    return policyEntry.Value.Value
+                        .Where(a => a.Value > 0)
+                        .Select(assetEntry =>
+                        {
+                            string assetNameHex = Convert.ToHexString(assetEntry.Key).ToLowerInvariant();
+                            return ExtractMetadata(rootMap, policyId, assetNameHex, assetEntry.Value);
+                        });
+                });
+            })];
 
-                    TokenMetadataOnChain? tokenMetadata = ExtractMetadata(rootMap, policyId, assetNameHex, assetEntry.Value);
+        // Log skipped tokens
+        allTokens
+            .Where(t => t is not null && (string.IsNullOrEmpty(t.Name) || string.IsNullOrEmpty(t.Logo)))
+            .ToList()
+            .ForEach(t => logger.LogWarning("Skipping {Subject} - CIP-25 requires name and image fields", t!.Subject));
 
-                    if (tokenMetadata == null)
-                        continue;
-
-                    if (string.IsNullOrEmpty(tokenMetadata.Name) || string.IsNullOrEmpty(tokenMetadata.Logo))
-                    {
-                        logger.LogWarning("Skipping {Subject} - CIP-25 requires name and image fields", subject);
-                        continue;
-                    }
-
-                    tokensWithMetadata[subject] = tokenMetadata;
-                }
-            }
-        }
+        // Filter valid tokens
+        Dictionary<string, TokenMetadataOnChain> tokensWithMetadata = allTokens
+            .Where(t => t is not null && !string.IsNullOrEmpty(t.Name) && !string.IsNullOrEmpty(t.Logo))
+            .GroupBy(t => t!.Subject)
+            .ToDictionary(g => g.Key, g => g.Last()!);
 
         if (tokensWithMetadata.Count == 0)
             return;
 
         await using MetadataDbContext db = await dbContextFactory.CreateDbContextAsync();
 
-        List<string> existingSubjects = [.. tokensWithMetadata.Keys];
         Dictionary<string, TokenMetadataOnChain> existingRecords = await db.TokenMetadataOnChain
-            .Where(t => existingSubjects.Contains(t.Subject))
+            .Where(t => tokensWithMetadata.Keys.Contains(t.Subject))
             .AsNoTracking()
             .ToDictionaryAsync(t => t.Subject);
 
-        foreach ((string? subject, TokenMetadataOnChain? tokenData) in tokensWithMetadata)
-        {
-            if (existingRecords.TryGetValue(subject, out TokenMetadataOnChain? existing))
-            {
-                db.TokenMetadataOnChain.Update(tokenData);
-                logger.LogInformation("Updated {Subject} - quantity: {OldQty} -> {NewQty}",
-                    subject, existing.Quantity, tokenData.Quantity);
-            }
-            else
-            {
-                db.TokenMetadataOnChain.Add(tokenData);
-                logger.LogInformation("Inserted {Subject} with quantity: {Quantity}", subject, tokenData.Quantity);
-            }
-        }
+        List<TokenMetadataOnChain> toInsert = [.. tokensWithMetadata.Values.Where(t => !existingRecords.ContainsKey(t.Subject))];
+        List<TokenMetadataOnChain> toUpdate = [.. tokensWithMetadata.Values.Where(t => existingRecords.TryGetValue(t.Subject, out TokenMetadataOnChain? existing) && !TokensAreEqual(t, existing))];
+
+        db.TokenMetadataOnChain.AddRange(toInsert);
+        db.TokenMetadataOnChain.UpdateRange(toUpdate);
+
+        toInsert.ForEach(t => logger.LogInformation("Inserted {Subject} with quantity: {Quantity}", t.Subject, t.Quantity));
+        toUpdate.ForEach(t => logger.LogInformation("Updated {Subject} - quantity: {OldQty} -> {NewQty}",
+            t.Subject, existingRecords[t.Subject].Quantity, t.Quantity));
+
         await db.SaveChangesAsync();
     }
 
@@ -157,45 +143,36 @@ public partial class CIP25Reducer(
         if (assetKvp.Value is not MetadatumMap assetMap)
             return null;
 
-        TokenMetadataOnChain metadata = new(
+        Dictionary<string, TransactionMetadatum> fields = assetMap.Value
+            .Where(f => f.Key is MetadataText)
+            .ToDictionary(f => ((MetadataText)f.Key).Value ?? string.Empty, f => f.Value);
+
+        string name = fields.TryGetValue("name", out TransactionMetadatum? n) && n is MetadataText nt
+            ? nt.Value ?? string.Empty : string.Empty;
+
+        string imageUri = fields.TryGetValue("image", out TransactionMetadatum? img)
+            ? img switch
+            {
+                MetadataText imageText => imageText.Value ?? string.Empty,
+                MetadatumList imageList => string.Join(string.Empty, imageList.Value.OfType<MetadataText>().Select(t => t.Value)),
+                _ => string.Empty
+            }
+            : string.Empty;
+
+        string description = fields.TryGetValue("description", out TransactionMetadatum? d) && d is MetadataText dt
+            ? dt.Value ?? string.Empty : string.Empty;
+
+        return new TokenMetadataOnChain(
             Subject: $"{policyId}{assetNameHex}",
             PolicyId: policyId,
             AssetName: assetNameHex,
-            Name: "",
-            Logo: "",
-            Description: "",
+            Name: name,
+            Logo: IsValidUri(imageUri) ? imageUri : string.Empty,
+            Description: description,
             Quantity: quantity,
             Decimals: 0,
             TokenType: TokenType.CIP25
         );
-
-        foreach (KeyValuePair<TransactionMetadatum, TransactionMetadatum> field in assetMap.Value)
-        {
-            if (field.Key is MetadataText keyText)
-            {
-                switch (keyText.Value)
-                {
-                    case "name" when field.Value is MetadataText nameText:
-                        metadata = metadata with { Name = nameText.Value ?? "" };
-                        break;
-                    case "image":
-                        string imageUri = field.Value switch
-                        {
-                            MetadataText imageText => imageText.Value ?? "",
-                            MetadatumList imageList => string.Join("", imageList.Value.OfType<MetadataText>().Select(t => t.Value)),
-                            _ => ""
-                        };
-                        if (IsValidUri(imageUri))
-                            metadata = metadata with { Logo = imageUri };
-                        break;
-                    case "description" when field.Value is MetadataText descText:
-                        metadata = metadata with { Description = descText.Value ?? "" };
-                        break;
-                }
-            }
-        }
-
-        return metadata;
     }
 
     private static bool IsValidUri(string uri)
@@ -215,6 +192,13 @@ public partial class CIP25Reducer(
 
         return uri.Length > ValidSchemes.First(s => uri.StartsWith(s, StringComparison.OrdinalIgnoreCase)).Length;
     }
+
+    private static bool TokensAreEqual(TokenMetadataOnChain a, TokenMetadataOnChain b) =>
+        a.Name == b.Name &&
+        a.Logo == b.Logo &&
+        a.Description == b.Description &&
+        a.Quantity == b.Quantity &&
+        a.Decimals == b.Decimals;
 
     [GeneratedRegex(@"^data:image\/[a-zA-Z0-9]+(?:\+[a-zA-Z0-9]+)?;base64,", RegexOptions.Compiled)]
     private static partial Regex MyRegex();

@@ -1,13 +1,15 @@
-using COMP.Data.Models.Entity;
-using Microsoft.EntityFrameworkCore;
-using LinqKit;
+using COMP.API.Services;
 using COMP.Data.Data;
+using COMP.Data.Models.Entity;
+using LinqKit;
+using Microsoft.EntityFrameworkCore;
 
-namespace COMP.API.Modules.Handlers;
+namespace COMP.API.Handlers;
 
 public class MetadataHandler
 (
-    IDbContextFactory<MetadataDbContext> _dbContextFactory
+    IDbContextFactory<MetadataDbContext> _dbContextFactory,
+    ImageUploadService? _imageUploadService = null
 )
 {
     // Fetch data by subject (checks both registry and on-chain tables)
@@ -16,7 +18,7 @@ public class MetadataHandler
         await using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync();
 
         // Query both tables sequentially
-        TokenMetadata? registryToken = await db.TokenMetadata
+        TokenMetadataRegistry? registryToken = await db.TokenMetadataRegistry
             .AsNoTracking()
             .FirstOrDefaultAsync(t => t.Subject == subject);
 
@@ -29,6 +31,10 @@ public class MetadataHandler
             return Results.NotFound();
 
         // Prioritize on-chain data, fall back to registry
+        string? logo = onChainToken?.Logo ?? registryToken?.Logo;
+
+        // Fire and forget: upload logo to S3 if enabled
+        _imageUploadService?.TryEnqueueUpload(subject, logo);
 
         return Results.Ok(new
         {
@@ -36,7 +42,7 @@ public class MetadataHandler
             policyId = onChainToken?.PolicyId ?? registryToken?.PolicyId ?? "",
             name = onChainToken?.Name ?? registryToken?.Name,
             ticker = registryToken?.Ticker,
-            logo = onChainToken?.Logo ?? registryToken?.Logo,
+            logo,
             description = onChainToken?.Description ?? registryToken?.Description,
             decimals = onChainToken?.Decimals ?? registryToken?.Decimals ?? 0,
             quantity = onChainToken?.Quantity,
@@ -72,14 +78,15 @@ public class MetadataHandler
         List<string> distinctSubjects = [.. subjects.Distinct()];
 
         // Build predicate for registry metadata
-        ExpressionStarter<TokenMetadata> registryPredicate = PredicateBuilder.New<TokenMetadata>(false);
+        ExpressionStarter<TokenMetadataRegistry> registryPredicate = PredicateBuilder.New<TokenMetadataRegistry>(false);
         registryPredicate = registryPredicate.Or(token => distinctSubjects.Contains(token.Subject));
 
         if (!string.IsNullOrWhiteSpace(policyId))
         {
             string lowerPolicyId = policyId.ToLowerInvariant();
             registryPredicate = registryPredicate.And(token =>
-                token.Subject.Substring(0, 56).Equals(lowerPolicyId, StringComparison.CurrentCultureIgnoreCase));
+                token.Subject.Length >= 56 &&
+                token.Subject.Substring(0, 56).ToLower() == lowerPolicyId);
         }
         if (requireName)
             registryPredicate = registryPredicate.And(token => !string.IsNullOrEmpty(token.Name));
@@ -124,8 +131,8 @@ public class MetadataHandler
 
         await using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync();
 
-        // Query both tables sequentially
-        List<TokenMetadata> registryTokens = await db.TokenMetadata
+        // Query both tables sequentially (DbContext is not thread-safe)
+        List<TokenMetadataRegistry> registryTokens = await db.TokenMetadataRegistry
             .AsNoTracking()
             .Where(registryPredicate)
             .ToListAsync();
@@ -135,19 +142,23 @@ public class MetadataHandler
             .Where(onChainPredicate)
             .ToListAsync();
 
+        // Convert to dictionaries for O(1) lookups instead of O(n) FirstOrDefault
+        Dictionary<string, TokenMetadataRegistry> registryBySubject = registryTokens.ToDictionary(t => t.Subject);
+        Dictionary<string, TokenMetadataOnChain> onChainBySubject = onChainTokens.ToDictionary(t => t.Subject);
+
         // Merge results - prioritize on-chain, combine with registry
         var mergedResults = distinctSubjects
             .Select(subject =>
             {
-                TokenMetadata? registry = registryTokens.FirstOrDefault(t => t.Subject == subject);
-                TokenMetadataOnChain? onChain = onChainTokens.FirstOrDefault(t => t.Subject == subject);
+                registryBySubject.TryGetValue(subject, out TokenMetadataRegistry? registry);
+                onChainBySubject.TryGetValue(subject, out TokenMetadataOnChain? onChain);
 
                 if (registry is null && onChain is null)
                     return null;
 
                 return new
                 {
-                    subject = subject,
+                    subject,
                     policyId = onChain?.PolicyId ?? registry?.PolicyId ?? "",
                     name = onChain?.Name ?? registry?.Name,
                     ticker = registry?.Ticker,
@@ -165,6 +176,12 @@ public class MetadataHandler
             })
             .Where(t => t is not null)
             .ToList();
+
+        // Fire and forget: upload logos to S3 if enabled
+        mergedResults
+            .Where(t => !string.IsNullOrEmpty(t?.logo))
+            .ToList()
+            .ForEach(t => _imageUploadService?.TryEnqueueUpload(t!.subject, t.logo));
 
         int total = mergedResults.Count;
 

@@ -19,7 +19,7 @@ public class GithubReducer
             {
                 logger.LogInformation("Starting metadata synchronization cycle");
 
-                SyncState? syncState = await metadataDbService.GetSyncStateAsync(stoppingToken);
+                RegistrySyncState? syncState = await metadataDbService.GetRegistrySyncStateAsync(stoppingToken);
 
                 if (syncState is null)
                 {
@@ -38,28 +38,30 @@ public class GithubReducer
                         logger.LogError("Tree response is null");
                         break;
                     }
-                    foreach (GitTreeItem item in treeResponse.Tree)
+                    // Filter mapping files and extract subjects in single pass
+                    List<(GitTreeItem item, string subject)> mappingFiles = [.. treeResponse.Tree
+                        .Where(item => item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
+                        .Select(item => (item, subject: ExtractSubjectFromPath(item.Path)))];
+
+                    // Batch check existing subjects to avoid N+1 queries
+                    HashSet<string> existingSubjects = await metadataDbService.GetExistingSubjectsAsync(
+                        mappingFiles.Select(m => m.subject), stoppingToken);
+
+                    foreach ((GitTreeItem item, string subject) in mappingFiles)
                     {
-                        if (item.Path?.StartsWith("mappings/") == true && item.Path.EndsWith(".json"))
-                        {
-                            string subject = ExtractSubjectFromPath(item.Path);
+                        if (existingSubjects.Contains(subject)) continue;
 
-                            bool exist = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
-                            if (exist) continue;
+                        MetadataResponse? mapping = await githubService.GetMappingJsonAsync<MetadataResponse>(latestCommit.Sha, item.Path!, stoppingToken);
+                        TokenMetadataRegistry? token = MapTokenMetadataRegistry(mapping);
 
-                            MetadataResponse? mapping = await githubService.GetMappingJsonAsync<MetadataResponse>(latestCommit.Sha, item.Path, stoppingToken);
-                            TokenMetadata? token = MapTokenMetadata(mapping);
-
-                            if (token == null) continue;
-                            await metadataDbService.AddTokenAsync(token, stoppingToken);
-                        }
+                        if (token == null) continue;
+                        await metadataDbService.AddTokenAsync(token, stoppingToken);
                     }
-                    await metadataDbService.UpsertSyncStateAsync(latestCommit, stoppingToken);
+                    await metadataDbService.UpsertRegistrySyncStateAsync(latestCommit, stoppingToken);
                 }
                 else
                 {
                     List<GitCommit> latestCommitsSince = await GetLatestCommitsSinceAsync(syncState.Date, stoppingToken);
-                    
 
                     foreach (GitCommit commit in latestCommitsSince)
                     {
@@ -68,52 +70,56 @@ public class GithubReducer
                         GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
                         if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null) continue;
 
-                        foreach (GitCommitFile file in resolvedCommit.Files)
+                        // Filter and extract subjects for non-removed files in single pass
+                        List<(GitCommitFile file, string subject)> filesToProcess = [.. resolvedCommit.Files
+                            .Where(f => f.Filename is not null && !string.Equals(f.Status, "removed", StringComparison.OrdinalIgnoreCase))
+                            .Select(f => (file: f, subject: ExtractSubjectFromPath(f.Filename)))];
+
+                        // Log removed files
+                        foreach (GitCommitFile removedFile in resolvedCommit.Files.Where(f => string.Equals(f.Status, "removed", StringComparison.OrdinalIgnoreCase)))
                         {
-                            if (file.Filename is not null)
+                            logger.LogInformation("Skipping removed file {Filename} in commit {Sha}", removedFile.Filename, resolvedCommit.Sha);
+                        }
+
+                        // Batch check existing subjects
+                        HashSet<string> existingSubjects = await metadataDbService.GetExistingSubjectsAsync(
+                            filesToProcess.Select(f => f.subject), stoppingToken);
+
+                        foreach ((GitCommitFile file, string subject) in filesToProcess)
+                        {
+                            try
                             {
-                                if (string.Equals(file.Status, "removed", StringComparison.OrdinalIgnoreCase))
+                                MetadataResponse? mapping = await githubService.GetMappingJsonAsync<MetadataResponse>(resolvedCommit.Sha, file.Filename!, stoppingToken);
+                                TokenMetadataRegistry? token = MapTokenMetadataRegistry(mapping);
+                                if (token is null)
                                 {
-                                    logger.LogInformation("Skipping removed file {Filename} in commit {Sha}", file.Filename, resolvedCommit.Sha);
+                                    logger.LogWarning("Failed to map registry item for subject {Subject} in commit {Sha}", subject, resolvedCommit.Sha);
                                     continue;
                                 }
-                                string subject = ExtractSubjectFromPath(file.Filename);
 
-                                try
+                                if (existingSubjects.Contains(subject))
                                 {
-                                    MetadataResponse? mapping = await githubService.GetMappingJsonAsync<MetadataResponse>(resolvedCommit.Sha, file.Filename, stoppingToken);
-                                    TokenMetadata? token = MapTokenMetadata(mapping);
-                                    if (token is null) 
-                                    {
-                                        logger.LogWarning("Failed to map registry item for subject {Subject} in commit {Sha}", subject, resolvedCommit.Sha);
-                                        continue;
-                                    }
-
-                                    bool exists = await metadataDbService.SubjectExistsAsync(subject, stoppingToken);
-                                    if (exists)
-                                    {
-                                        await metadataDbService.UpdateTokenAsync(token, stoppingToken);
-                                    }
-                                    else
-                                    {
-                                        await metadataDbService.AddTokenAsync(token, stoppingToken);
-                                    }
+                                    await metadataDbService.UpdateTokenAsync(token, stoppingToken);
                                 }
-                                catch (HttpRequestException httpEx)
+                                else
                                 {
-                                    logger.LogError(httpEx, "Network error while fetching metadata for subject {Subject}. Skipping this update.", subject);
-                                }
-                                catch (JsonException jsonEx)
-                                {
-                                    logger.LogError(jsonEx, "JSON parsing error for subject {Subject}. File may be malformed. Skipping this update.", subject);
-                                }
-                                catch (Exception ex)
-                                {
-                                    logger.LogError(ex, "Unexpected error processing metadata for subject {Subject}. Skipping this update.", subject);
+                                    await metadataDbService.AddTokenAsync(token, stoppingToken);
                                 }
                             }
+                            catch (HttpRequestException httpEx)
+                            {
+                                logger.LogError(httpEx, "Network error while fetching metadata for subject {Subject}. Skipping this update.", subject);
+                            }
+                            catch (JsonException jsonEx)
+                            {
+                                logger.LogError(jsonEx, "JSON parsing error for subject {Subject}. File may be malformed. Skipping this update.", subject);
+                            }
+                            catch (Exception ex)
+                            {
+                                logger.LogError(ex, "Unexpected error processing metadata for subject {Subject}. Skipping this update.", subject);
+                            }
                         }
-                        await metadataDbService.UpsertSyncStateAsync(resolvedCommit, stoppingToken);
+                        await metadataDbService.UpsertRegistrySyncStateAsync(resolvedCommit, stoppingToken);
                     }
                 }
 
@@ -127,7 +133,7 @@ public class GithubReducer
         }
     }
 
-    public TokenMetadata? MapTokenMetadata(MetadataResponse? resp)
+    public TokenMetadataRegistry? MapTokenMetadataRegistry(MetadataResponse? resp)
     {
         if (resp is null)
         {
@@ -158,7 +164,7 @@ public class GithubReducer
             return null;
         }
 
-        return new TokenMetadata(
+        return new TokenMetadataRegistry(
             Subject: subject,
             Name: name,
             Ticker: ticker,

@@ -10,7 +10,7 @@ public class MetadataDbService
     ILogger<MetadataDbService> logger,
     IDbContextFactory<MetadataDbContext> _dbContextFactory)
 {
-    public async Task<TokenMetadata?> AddTokenAsync(TokenMetadata token, CancellationToken cancellationToken)
+    public async Task<TokenMetadataRegistry?> AddTokenAsync(TokenMetadataRegistry token, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -23,20 +23,20 @@ public class MetadataDbService
             return null;
         }
 
-        await dbContext.TokenMetadata.AddAsync(token, cancellationToken);
+        await dbContext.TokenMetadataRegistry.AddAsync(token, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return token;
     }
 
-    public async Task<SyncState?> GetSyncStateAsync(CancellationToken cancellationToken)
+    public async Task<RegistrySyncState?> GetRegistrySyncStateAsync(CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.SyncState
+        return await dbContext.RegistrySyncState
             .OrderByDescending(ss => ss.Date)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public async Task UpsertSyncStateAsync(GitCommit latestCommit, CancellationToken cancellationToken)
+    public async Task UpsertRegistrySyncStateAsync(GitCommit latestCommit, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
@@ -44,61 +44,39 @@ public class MetadataDbService
         DateTimeOffset newDate = latestCommit.Commit?.Author?.Date ?? DateTimeOffset.UtcNow;
 
         // Delete existing sync state if it exists
-        SyncState? existingSyncState = await dbContext.SyncState
+        RegistrySyncState? existingRegistrySyncState = await dbContext.RegistrySyncState
             .FirstOrDefaultAsync(cancellationToken);
 
-        if (existingSyncState is not null)
+        if (existingRegistrySyncState is not null)
         {
-            string oldHash = existingSyncState.Hash;
-            dbContext.SyncState.Remove(existingSyncState);
+            string oldHash = existingRegistrySyncState.Hash;
+            dbContext.RegistrySyncState.Remove(existingRegistrySyncState);
             logger.LogInformation("Removed old sync state with hash: {OldHash}", oldHash);
         }
 
         // Insert new sync state
-        SyncState syncState = new(
+        RegistrySyncState syncState = new(
             Hash: newSha,
             Date: newDate
         );
-        await dbContext.SyncState.AddAsync(syncState, cancellationToken);
+        await dbContext.RegistrySyncState.AddAsync(syncState, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         logger.LogInformation("Sync state created with hash: {Hash}", newSha);
     }
 
-    public async Task<bool> SubjectExistsAsync(string subject, CancellationToken cancellationToken)
+    public async Task<HashSet<string>> GetExistingSubjectsAsync(IEnumerable<string> subjects, CancellationToken cancellationToken)
     {
         using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.TokenMetadata
-            .AnyAsync(t => t.Subject == subject, cancellationToken);
+        List<string> subjectList = subjects.ToList();
+        List<string> existing = await dbContext.TokenMetadataRegistry
+            .Where(t => subjectList.Contains(t.Subject))
+            .Select(t => t.Subject)
+            .ToListAsync(cancellationToken);
+        return [.. existing];
     }
-    public async Task DeleteTokenAsync(string subject, CancellationToken cancellationToken)
+
+    public async Task<TokenMetadataRegistry?> UpdateTokenAsync(TokenMetadataRegistry updated, CancellationToken cancellationToken)
     {
-        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-        TokenMetadata? existingMetadata = await dbContext.TokenMetadata
-            .Where(tm => tm.Subject == subject)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (existingMetadata != null)
-        {
-            dbContext.TokenMetadata.Remove(existingMetadata);
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-    }
-    
-    public async Task<TokenMetadata?> UpdateTokenAsync(TokenMetadata updated, CancellationToken cancellationToken)
-    {
-        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-
-        TokenMetadata? existingMetadata = await dbContext.TokenMetadata
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Subject == updated.Subject, cancellationToken);
-
-        if (existingMetadata is null)
-        {
-            logger.LogWarning("Token metadata not found for subject {Subject}", updated.Subject);
-            return null;
-        }
-
         if (string.IsNullOrEmpty(updated.Subject) ||
             string.IsNullOrEmpty(updated.Name) ||
             string.IsNullOrEmpty(updated.Description) ||
@@ -108,8 +86,8 @@ public class MetadataDbService
             return null;
         }
 
-        // Preserve immutable fields from existing if needed; here we accept the provided updated entity
-        dbContext.TokenMetadata.Update(updated);
+        using MetadataDbContext dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        dbContext.TokenMetadataRegistry.Update(updated);
         await dbContext.SaveChangesAsync(cancellationToken);
         return updated;
     }

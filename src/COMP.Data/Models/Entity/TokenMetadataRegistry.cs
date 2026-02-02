@@ -1,6 +1,6 @@
 namespace COMP.Data.Models.Entity;
 
-public record TokenMetadata(
+public record TokenMetadataRegistry(
     string Subject,
     string Name,
     string Ticker,
