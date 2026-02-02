@@ -2,12 +2,14 @@ using COMP.Data.Models.Entity;
 using Microsoft.EntityFrameworkCore;
 using LinqKit;
 using COMP.Data.Data;
+using COMP.API.Services;
 
 namespace COMP.API.Modules.Handlers;
 
 public class MetadataHandler
 (
-    IDbContextFactory<MetadataDbContext> _dbContextFactory
+    IDbContextFactory<MetadataDbContext> _dbContextFactory,
+    ImageUploadService? _imageUploadService = null
 )
 {
     // Fetch data by subject (checks both registry and on-chain tables)
@@ -29,6 +31,13 @@ public class MetadataHandler
             return Results.NotFound();
 
         // Prioritize on-chain data, fall back to registry
+        string? logo = onChainToken?.Logo ?? registryToken?.Logo;
+        string? cachedLogo = _imageUploadService is not null
+            ? await _imageUploadService.GetCachedUrlAsync(logo)
+            : null;
+
+        if (cachedLogo is null)
+            _imageUploadService?.TryEnqueueUpload(subject, logo);
 
         return Results.Ok(new
         {
@@ -36,7 +45,7 @@ public class MetadataHandler
             policyId = onChainToken?.PolicyId ?? registryToken?.PolicyId ?? "",
             name = onChainToken?.Name ?? registryToken?.Name,
             ticker = registryToken?.Ticker,
-            logo = onChainToken?.Logo ?? registryToken?.Logo,
+            logo = cachedLogo ?? logo,
             description = onChainToken?.Description ?? registryToken?.Description,
             decimals = onChainToken?.Decimals ?? registryToken?.Decimals ?? 0,
             quantity = onChainToken?.Quantity,

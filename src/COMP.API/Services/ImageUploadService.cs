@@ -26,6 +26,21 @@ public partial class ImageUploadService(
         _ = UploadAsync(subject, logoUri);
     }
 
+    public async Task<string?> GetCachedUrlAsync(string? logoUri)
+    {
+        if (!_s3Options.Enabled || s3Service is null || string.IsNullOrEmpty(logoUri))
+            return null;
+
+        string key = GetKeyFromUri(logoUri);
+        if (string.IsNullOrEmpty(key))
+            return null;
+
+        if (await s3Service.ExistsAsync(key))
+            return s3Service.GetPublicUrl(key);
+
+        return null;
+    }
+
     private async Task UploadAsync(string subject, string logoUri)
     {
         await _semaphore.WaitAsync();
@@ -39,8 +54,7 @@ public partial class ImageUploadService(
                 return;
             }
 
-            string extension = GetExtensionFromContentType(contentType);
-            string s3Key = $"{GetKeyFromUri(logoUri, imageData)}{extension}";
+            string s3Key = GetKeyFromUri(logoUri, imageData);
 
             // Check if already exists before uploading
             if (await s3Service!.ExistsAsync(s3Key))
@@ -152,6 +166,27 @@ public partial class ImageUploadService(
         {
             return (null, null, "Request timed out");
         }
+    }
+
+    private static string GetKeyFromUri(string logoUri)
+    {
+        // Use the CID directly from IPFS URIs
+        if (logoUri.StartsWith("ipfs://", StringComparison.OrdinalIgnoreCase))
+            return logoUri[7..];
+
+        // Use the transaction ID directly from Arweave URIs
+        if (logoUri.StartsWith("ar://", StringComparison.OrdinalIgnoreCase))
+            return logoUri[5..];
+
+        // For base64, hash the data URI string
+        if (logoUri.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
+        {
+            byte[] hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(logoUri));
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        // For http URLs, we can't determine key without fetching
+        return string.Empty;
     }
 
     private static string GetKeyFromUri(string logoUri, byte[] imageData)

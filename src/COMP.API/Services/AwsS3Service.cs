@@ -20,7 +20,8 @@ public class AwsS3Service(
             BucketName = _options.BucketName,
             Key = key,
             InputStream = stream,
-            ContentType = contentType ?? "application/octet-stream"
+            ContentType = contentType ?? "application/octet-stream",
+            CannedACL = S3CannedACL.PublicRead
         };
 
         await s3Client.PutObjectAsync(request, ct);
