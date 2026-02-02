@@ -5,14 +5,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>COMP.API</AssemblyName>
-    <RootNamespace>Comp</RootNamespace>
+    <RootNamespace>COMP.API</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="FastEndpoints" Version="5.31.0" />
     <PackageReference Include="FastEndpoints.Swagger" Version="5.31.0" />
+    <PackageReference Include="AWSSDK.S3" Version="4.0.18.1" />
     <PackageReference Include="Linqkit.Microsoft.EntityFrameworkCore" Version="10.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+    <PackageReference Include="Mime" Version="3.8.0" />
     <PackageReference Include="Scalar.AspNetCore" Version="1.2.19" />
   </ItemGroup>
 
