@@ -3,16 +3,13 @@ using FastEndpoints.Swagger;
 using Scalar.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using COMP.Data.Data;
-using COMP.API.Handlers;
 using COMP.API.Extensions;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContextFactory<MetadataDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-builder.Services.AddSingleton<MetadataHandler>();
-
+    
 builder.Services.AddS3ImageUpload(builder.Configuration);
 
 builder.Services.AddFastEndpoints();
