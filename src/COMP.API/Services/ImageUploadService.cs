@@ -9,16 +9,18 @@ namespace COMP.API.Services;
 
 public partial class ImageUploadService(
     IOptions<S3Options> s3Options,
+    IOptions<GatewayOptions> gatewayOptions,
     IHttpClientFactory httpClientFactory,
     ILogger<ImageUploadService> logger,
     AwsS3Service? s3Service = null)
 {
-    private readonly S3Options _options = s3Options.Value;
+    private readonly S3Options _s3Options = s3Options.Value;
+    private readonly GatewayOptions _gatewayOptions = gatewayOptions.Value;
     private readonly SemaphoreSlim _semaphore = new(s3Options.Value.MaxParallelUploads > 0 ? s3Options.Value.MaxParallelUploads : 4);
 
     public void TryEnqueueUpload(string subject, string? logoUri)
     {
-        if (!_options.Enabled || s3Service is null || string.IsNullOrEmpty(logoUri))
+        if (!_s3Options.Enabled || s3Service is null || string.IsNullOrEmpty(logoUri))
             return;
 
         _ = UploadAsync(subject, logoUri);
@@ -103,22 +105,22 @@ public partial class ImageUploadService(
 
     private async Task<(byte[]? Data, string? ContentType, string? Error)> FetchFromIpfsAsync(string ipfsUri, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_options.IpfsGateway))
+        if (string.IsNullOrWhiteSpace(_gatewayOptions.Ipfs))
             return (null, null, "IPFS gateway not configured");
 
         string cid = ipfsUri[7..];
-        string gatewayUrl = _options.IpfsGateway.TrimEnd('/') + "/" + cid;
+        string gatewayUrl = _gatewayOptions.Ipfs.TrimEnd('/') + "/" + cid;
 
         return await FetchFromUrlAsync(gatewayUrl, ct);
     }
 
     private async Task<(byte[]? Data, string? ContentType, string? Error)> FetchFromArweaveAsync(string arUri, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(_options.ArweaveGateway))
+        if (string.IsNullOrWhiteSpace(_gatewayOptions.Arweave))
             return (null, null, "Arweave gateway not configured");
 
         string txId = arUri[5..];
-        string gatewayUrl = _options.ArweaveGateway.TrimEnd('/') + "/" + txId;
+        string gatewayUrl = _gatewayOptions.Arweave.TrimEnd('/') + "/" + txId;
 
         return await FetchFromUrlAsync(gatewayUrl, ct);
     }

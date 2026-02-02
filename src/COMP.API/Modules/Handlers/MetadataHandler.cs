@@ -79,7 +79,7 @@ public class MetadataHandler
         {
             string lowerPolicyId = policyId.ToLowerInvariant();
             registryPredicate = registryPredicate.And(token =>
-                token.Subject.Substring(0, 56).Equals(lowerPolicyId, StringComparison.CurrentCultureIgnoreCase));
+                token.Subject.Substring(0, 56).ToLower() == lowerPolicyId);
         }
         if (requireName)
             registryPredicate = registryPredicate.And(token => !string.IsNullOrEmpty(token.Name));

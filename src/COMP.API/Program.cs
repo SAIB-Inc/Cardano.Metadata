@@ -4,12 +4,14 @@ using Scalar.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using COMP.Data.Data;
 using COMP.API.Extensions;
+using COMP.API.Modules.Handlers;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContextFactory<MetadataDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-    
+
+builder.Services.AddScoped<MetadataHandler>();
 builder.Services.AddS3ImageUpload(builder.Configuration);
 
 builder.Services.AddFastEndpoints();

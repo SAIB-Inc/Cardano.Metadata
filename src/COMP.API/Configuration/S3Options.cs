@@ -11,7 +11,5 @@ public class S3Options
     public string? SecretKey { get; set; }
     public string? ServiceUrl { get; set; }
     public string? PublicBaseUrl { get; set; }
-    public string? IpfsGateway { get; set; }
-    public string? ArweaveGateway { get; set; }
     public int MaxParallelUploads { get; set; } = 4;
 }

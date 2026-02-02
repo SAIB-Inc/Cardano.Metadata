@@ -9,6 +9,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddS3ImageUpload(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<S3Options>(configuration.GetSection(S3Options.SectionName));
+        services.Configure<GatewayOptions>(configuration.GetSection(GatewayOptions.SectionName));
 
         S3Options s3Options = configuration.GetSection(S3Options.SectionName).Get<S3Options>() ?? new();
 

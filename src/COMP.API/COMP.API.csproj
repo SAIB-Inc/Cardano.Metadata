@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>COMP.API</AssemblyName>
-    <RootNamespace>Comp</RootNamespace>
+    <RootNamespace>COMP.API</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
