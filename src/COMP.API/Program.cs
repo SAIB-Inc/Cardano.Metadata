@@ -13,14 +13,6 @@ builder.Services.AddDbContextFactory<MetadataDbContext>(options =>
 builder.Services.AddSingleton<MetadataHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddFastEndpoints();
-builder.Services.SwaggerDocument(o =>
-{
-    o.DocumentSettings = s =>
-    {
-        s.Title = "COMP API";
-        s.Version = "v1";
-    };
-});
 
 WebApplication app = builder.Build();
 
