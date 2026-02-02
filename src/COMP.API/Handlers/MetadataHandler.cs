@@ -1,4 +1,3 @@
-using COMP.API.Services;
 using COMP.Data.Data;
 using COMP.Data.Models.Entity;
 using LinqKit;
@@ -6,11 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace COMP.API.Handlers;
 
-public class MetadataHandler
-(
-    IDbContextFactory<MetadataDbContext> _dbContextFactory,
-    ImageUploadService? _imageUploadService = null
-)
+public class MetadataHandler(IDbContextFactory<MetadataDbContext> _dbContextFactory)
 {
     // Fetch data by subject (checks both registry and on-chain tables)
     public async Task<IResult> GetTokenMetadataAsync(string subject)
@@ -32,9 +27,6 @@ public class MetadataHandler
 
         // Prioritize on-chain data, fall back to registry
         string? logo = onChainToken?.Logo ?? registryToken?.Logo;
-
-        // Fire and forget: upload logo to S3 if enabled
-        _imageUploadService?.TryEnqueueUpload(subject, logo);
 
         return Results.Ok(new
         {
@@ -176,12 +168,6 @@ public class MetadataHandler
             })
             .Where(t => t is not null)
             .ToList();
-
-        // Fire and forget: upload logos to S3 if enabled
-        mergedResults
-            .Where(t => !string.IsNullOrEmpty(t?.logo))
-            .ToList()
-            .ForEach(t => _imageUploadService?.TryEnqueueUpload(t!.subject, t.logo));
 
         int total = mergedResults.Count;
 

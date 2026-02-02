@@ -3,7 +3,7 @@ using FastEndpoints.Swagger;
 using Scalar.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using COMP.Data.Data;
-using COMP.API.Modules.Handlers;
+using COMP.API.Handlers;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -30,8 +30,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-app.UseHttpsRedirection();
 
 app.UseFastEndpoints();
 
