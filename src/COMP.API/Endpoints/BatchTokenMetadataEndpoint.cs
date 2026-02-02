@@ -14,8 +14,7 @@ public class BatchTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpo
         AllowAnonymous();
         Description(b => b
             .WithName("BatchTokenMetadata")
-            .WithSummary("Retrieve token metadata for a batch of subjects")
-            .WithTags("Metadata"));
+            .WithSummary("Retrieve token metadata for a batch of subjects"));
     }
 
     public override async Task HandleAsync(BatchTokenMetadataRequest req, CancellationToken ct)

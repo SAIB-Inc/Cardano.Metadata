@@ -14,8 +14,7 @@ public class GetTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpoin
         AllowAnonymous();
         Description(b => b
             .WithName("GetTokenMetadata")
-            .WithSummary("Retrieve token metadata by subject")
-            .WithTags("Metadata"));
+            .WithSummary("Retrieve token metadata by subject"));
     }
 
     public override async Task HandleAsync(GetTokenMetadataRequest req, CancellationToken ct)
