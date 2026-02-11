@@ -28,7 +28,8 @@ public class BatchTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpo
             req.Offset,
             req.IncludeEmptyName,
             req.IncludeEmptyLogo,
-            req.IncludeEmptyTicker);
+            req.IncludeEmptyTicker,
+            ct);
 
         await result.ExecuteAsync(HttpContext);
     }

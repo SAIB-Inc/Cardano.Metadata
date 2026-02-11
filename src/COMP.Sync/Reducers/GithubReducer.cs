@@ -50,12 +50,26 @@ public class GithubReducer
                     foreach ((GitTreeItem item, string subject) in mappingFiles)
                     {
                         if (existingSubjects.Contains(subject)) continue;
+                        try
+                        {
+                            MetadataResponse? mapping = await githubService.GetMappingJsonAsync<MetadataResponse>(latestCommit.Sha, item.Path!, stoppingToken);
+                            TokenMetadataRegistry? token = MapTokenMetadataRegistry(mapping);
 
-                        MetadataResponse? mapping = await githubService.GetMappingJsonAsync<MetadataResponse>(latestCommit.Sha, item.Path!, stoppingToken);
-                        TokenMetadataRegistry? token = MapTokenMetadataRegistry(mapping);
-
-                        if (token == null) continue;
-                        await metadataDbService.AddTokenAsync(token, stoppingToken);
+                            if (token == null) continue;
+                            await metadataDbService.AddTokenAsync(token, stoppingToken);
+                        }
+                        catch (HttpRequestException httpEx)
+                        {
+                            logger.LogError(httpEx, "Network error while fetching metadata for subject {Subject}. Skipping this update.", subject);
+                        }
+                        catch (JsonException jsonEx)
+                        {
+                            logger.LogError(jsonEx, "JSON parsing error for subject {Subject}. File may be malformed. Skipping this update.", subject);
+                        }
+                        catch (Exception ex)
+                        {
+                            logger.LogError(ex, "Unexpected error processing metadata for subject {Subject}. Skipping this update.", subject);
+                        }
                     }
                     await metadataDbService.UpsertRegistrySyncStateAsync(latestCommit, stoppingToken);
                 }
@@ -70,13 +84,18 @@ public class GithubReducer
                         GitCommit? resolvedCommit = await githubService.GetMappingJsonAsync<GitCommit>(commit.Url, cancellationToken: stoppingToken);
                         if (resolvedCommit is null || string.IsNullOrEmpty(resolvedCommit.Sha) || resolvedCommit.Files is null) continue;
 
-                        // Filter and extract subjects for non-removed files in single pass
+                        // Filter and extract subjects for changed mapping files in single pass
                         List<(GitCommitFile file, string subject)> filesToProcess = [.. resolvedCommit.Files
-                            .Where(f => f.Filename is not null && !string.Equals(f.Status, "removed", StringComparison.OrdinalIgnoreCase))
+                            .Where(f => f.Filename?.StartsWith("mappings/") == true
+                                && f.Filename.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                                && !string.Equals(f.Status, "removed", StringComparison.OrdinalIgnoreCase))
                             .Select(f => (file: f, subject: ExtractSubjectFromPath(f.Filename)))];
 
-                        // Log removed files
-                        foreach (GitCommitFile removedFile in resolvedCommit.Files.Where(f => string.Equals(f.Status, "removed", StringComparison.OrdinalIgnoreCase)))
+                        // Log removed mapping files (deletes are intentionally not applied locally)
+                        foreach (GitCommitFile removedFile in resolvedCommit.Files.Where(f =>
+                                     f.Filename?.StartsWith("mappings/") == true
+                                     && f.Filename.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                                     && string.Equals(f.Status, "removed", StringComparison.OrdinalIgnoreCase)))
                         {
                             logger.LogInformation("Skipping removed file {Filename} in commit {Sha}", removedFile.Filename, resolvedCommit.Sha);
                         }
@@ -196,8 +215,17 @@ public class GithubReducer
     {
         if (string.IsNullOrEmpty(path))
             return string.Empty;
-        
-        return path.Replace("mappings/", string.Empty)
-                   .Replace(".json", string.Empty);
+
+        const string mappingsPrefix = "mappings/";
+        if (!path.StartsWith(mappingsPrefix, StringComparison.Ordinal))
+            return string.Empty;
+
+        if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        string relativePath = path[mappingsPrefix.Length..];
+        return relativePath.Length <= ".json".Length
+            ? string.Empty
+            : relativePath[..^".json".Length];
     }
 }

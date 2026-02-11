@@ -161,7 +161,8 @@ public class CIP68Reducer(
                     ))
                     .Where(x => UserTokenPrefixes.Values.Any(x.subject[(policyId.Length)..].StartsWith));
             })
-            .ToDictionary(x => x.subject, x => x.quantity);
+            .GroupBy(x => x.subject)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.quantity));
 
     private static (string name, string image, string description, int? decimals) ExtractCIP68Metadata(byte[] datumBytes)
     {
