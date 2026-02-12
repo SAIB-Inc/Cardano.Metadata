@@ -20,7 +20,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: infrastructure/comp-api/Dockerfile
     container_name: comp-app
     restart: unless-stopped
     depends_on:
