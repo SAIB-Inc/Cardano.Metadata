@@ -30,10 +30,10 @@ public class CIP68Reducer(
         { "RFT", "001bc280" }
     };
 
-    public async Task RollBackwardAsync(ulong slot)
-    {
-        await Task.CompletedTask;
-    }
+    // Rollback is intentionally not implemented - this metadata indexer is append-only
+    // and doesn't track historical state. On-chain metadata updates are rare and
+    // rollbacks would require re-syncing from scratch.
+    public async Task RollBackwardAsync(ulong slot) => await Task.CompletedTask;
 
     public async Task RollForwardAsync(Block block)
     {
@@ -52,244 +52,155 @@ public class CIP68Reducer(
     private static Dictionary<string, (string policyId, string baseName, byte[] datumBytes)> ExtractAllReferenceTokens(
         List<TransactionBody> txBodies,
         List<TransactionWitnessSet> witnessSets,
-        ILogger<CIP68Reducer> logger)
-    {
-        Dictionary<string, (string policyId, string baseName, byte[] datumBytes)> referenceTokens = [];
-
-        for (int i = 0; i < txBodies.Count; i++)
-        {
-            List<TransactionOutput>? outputs = txBodies[i].Outputs()?.ToList();
-            if (outputs == null || outputs.Count == 0)
-                continue;
-
-            TransactionWitnessSet? witnessSet = i < witnessSets.Count ? witnessSets[i] : null;
-            ExtractReferenceTokensFromOutputs(outputs, referenceTokens, witnessSet, logger);
-        }
-
-        return referenceTokens;
-    }
-
-    private static void ExtractReferenceTokensFromOutputs(
-        List<TransactionOutput> outputs,
-        Dictionary<string, (string policyId, string baseName, byte[] datumBytes)> referenceTokens,
-        TransactionWitnessSet? witnessSet,
-        ILogger<CIP68Reducer> logger)
-    {
-        foreach (TransactionOutput output in outputs)
-        {
-            Dictionary<byte[], TokenBundleOutput>? multiAsset = output.Amount()?.MultiAsset();
-            if (multiAsset == null)
-                continue;
-
-            foreach (KeyValuePair<byte[], TokenBundleOutput> policy in multiAsset)
+        ILogger<CIP68Reducer> logger) =>
+        txBodies
+            .Select((tx, i) => (outputs: tx.Outputs()?.ToList(), witnessSet: i < witnessSets.Count ? witnessSets[i] : null))
+            .Where(x => x.outputs is { Count: > 0 })
+            .SelectMany(x => x.outputs!.SelectMany(output =>
             {
-                string policyId = Convert.ToHexString(policy.Key).ToLowerInvariant();
-                ProcessPolicyAssets(policy.Value.Value, policyId, output, referenceTokens, witnessSet, logger);
-            }
-        }
-    }
+                Dictionary<byte[], TokenBundleOutput>? multiAsset = output.Amount()?.MultiAsset();
+                if (multiAsset is null) return [];
 
-    private static void ProcessPolicyAssets(
-        Dictionary<byte[], ulong> assets,
-        string policyId,
-        TransactionOutput output,
-        Dictionary<string, (string policyId, string baseName, byte[] datumBytes)> referenceTokens,
-        TransactionWitnessSet? witnessSet,
-        ILogger<CIP68Reducer> logger)
-    {
-        foreach (KeyValuePair<byte[], ulong> asset in assets)
-        {
-            if (asset.Value == 0)
-                continue;
-
-            string assetNameHex = Convert.ToHexString(asset.Key).ToLowerInvariant();
-            if (!assetNameHex.StartsWith(REFERENCE_PREFIX))
-                continue;
-
-            string baseName = assetNameHex[8..];
-            string referenceSubject = $"{policyId}{assetNameHex}";
-
-            if (referenceTokens.ContainsKey(referenceSubject))
-                continue;
-
-            byte[]? datumBytes = ExtractDatum(output, witnessSet);
-            if (datumBytes == null)
-            {
-                logger.LogDebug("No datum found for reference token {Subject}", referenceSubject);
-                continue;
-            }
-
-            referenceTokens[referenceSubject] = (policyId, baseName, datumBytes);
-        }
-    }
+                return multiAsset.SelectMany(policy =>
+                {
+                    string policyId = Convert.ToHexString(policy.Key).ToLowerInvariant();
+                    return policy.Value.Value
+                        .Where(asset => asset.Value > 0)
+                        .Select(asset => Convert.ToHexString(asset.Key).ToLowerInvariant())
+                        .Where(assetNameHex => assetNameHex.StartsWith(REFERENCE_PREFIX))
+                        .Select(assetNameHex =>
+                        {
+                            byte[]? datumBytes = ExtractDatum(output, x.witnessSet);
+                            if (datumBytes is null)
+                            {
+                                logger.LogDebug("No datum found for reference token {Subject}", $"{policyId}{assetNameHex}");
+                                return ((string policyId, string baseName, byte[] datumBytes)?)null;
+                            }
+                            return (policyId, baseName: assetNameHex[8..], datumBytes);
+                        })
+                        .Where(r => r is not null)
+                        .Select(r => r!.Value);
+                });
+            }))
+            .GroupBy(r => $"{r.policyId}{REFERENCE_PREFIX}{r.baseName}")
+            .ToDictionary(g => g.Key, g => g.First());
 
     private async Task<Dictionary<string, TokenMetadataOnChain>> ProcessReferenceTokensAsync(
         Dictionary<string, (string policyId, string baseName, byte[] datumBytes)> referenceTokens,
         List<TransactionBody> txBodies)
     {
         Dictionary<string, long> mintedUserTokens = ExtractMintedUserTokens(txBodies);
-        Dictionary<string, TokenMetadataOnChain> tokensToProcess = [];
 
-        foreach ((string _, (string? policyId, string? baseName, byte[]? datumBytes)) in referenceTokens)
-        {
-            string? userTokenSubject = await DetermineUserTokenSubjectAsync(baseName, policyId, mintedUserTokens);
-            if (userTokenSubject == null)
-                continue;
+        // Build all potential user token subjects for single batch DB query
+        List<string> allPotentialSubjects = referenceTokens.Values
+            .SelectMany(r => UserTokenPrefixes.Values.Select(prefix => $"{r.policyId}{prefix}{r.baseName}"))
+            .ToList();
 
-            long quantity = await GetTokenQuantityAsync(userTokenSubject, mintedUserTokens);
-            string assetName = userTokenSubject[policyId.Length..];
-            (string? name, string? image, string? description, int? decimals) = ExtractCIP68Metadata(datumBytes);
+        // Single DB query to get all existing tokens
+        await using MetadataDbContext db = await dbContextFactory.CreateDbContextAsync();
+        Dictionary<string, TokenMetadataOnChain> existingTokens = await db.TokenMetadataOnChain
+            .Where(t => allPotentialSubjects.Contains(t.Subject))
+            .AsNoTracking()
+            .ToDictionaryAsync(t => t.Subject);
 
-            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(image))
+        return referenceTokens.Values
+            .Select(r =>
             {
-                logger.LogWarning("Skipping {Subject} - CIP-68 requires name and image fields", userTokenSubject);
-                continue;
-            }
+                // Determine user token subject in prefix priority order
+                string? userTokenSubject = UserTokenPrefixes.Values
+                    .Select(prefix => $"{r.policyId}{prefix}{r.baseName}")
+                    .FirstOrDefault(s => mintedUserTokens.ContainsKey(s) || existingTokens.ContainsKey(s));
 
-            tokensToProcess[userTokenSubject] = new TokenMetadataOnChain(
-                Subject: userTokenSubject,
-                PolicyId: policyId,
-                AssetName: assetName,
-                Name: name,
-                Logo: image,
-                Description: description,
-                Quantity: quantity,
-                Decimals: decimals ?? 0,
-                TokenType: TokenType.CIP68
-            );
+                if (userTokenSubject == null)
+                    return null;
 
-            logger.LogDebug("Processed CIP-68 token: {Subject} (qty: {Quantity})", userTokenSubject, quantity);
-        }
+                // Get quantity from minted or existing
+                long quantity = mintedUserTokens.GetValueOrDefault(userTokenSubject, 0);
+                if (quantity == 0)
+                    quantity = existingTokens.GetValueOrDefault(userTokenSubject)?.Quantity ?? 0;
 
-        return tokensToProcess;
+                (string name, string image, string description, int? decimals) = ExtractCIP68Metadata(r.datumBytes);
+
+                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(image))
+                {
+                    logger.LogWarning("Skipping {Subject} - CIP-68 requires name and image fields", userTokenSubject);
+                    return null;
+                }
+
+                logger.LogDebug("Processed CIP-68 token: {Subject} (qty: {Quantity})", userTokenSubject, quantity);
+
+                return new TokenMetadataOnChain(
+                    Subject: userTokenSubject,
+                    PolicyId: r.policyId,
+                    AssetName: userTokenSubject[r.policyId.Length..],
+                    Name: name,
+                    Logo: image,
+                    Description: description,
+                    Quantity: quantity,
+                    Decimals: decimals ?? 0,
+                    TokenType: TokenType.CIP68
+                );
+            })
+            .Where(t => t is not null)
+            .ToDictionary(t => t!.Subject, t => t!);
     }
 
-    private static Dictionary<string, long> ExtractMintedUserTokens(List<TransactionBody> txBodies)
-    {
-        Dictionary<string, long> mintedUserTokens = [];
-
-        foreach (TransactionBody tx in txBodies)
-        {
-            Dictionary<byte[], TokenBundleMint>? mint = tx.Mint();
-            if (mint == null)
-                continue;
-
-            foreach (KeyValuePair<byte[], TokenBundleMint> policyEntry in mint)
+    private static Dictionary<string, long> ExtractMintedUserTokens(List<TransactionBody> txBodies) =>
+        txBodies
+            .Select(tx => tx.Mint())
+            .Where(mint => mint is not null)
+            .SelectMany(mint => mint!)
+            .SelectMany(policyEntry =>
             {
                 string policyId = Convert.ToHexString(policyEntry.Key).ToLowerInvariant();
-                foreach (KeyValuePair<byte[], long> asset in policyEntry.Value.Value)
-                {
-                    if (asset.Value <= 0)
-                        continue;
+                return policyEntry.Value.Value
+                    .Where(asset => asset.Value > 0)
+                    .Select(asset => (
+                        subject: $"{policyId}{Convert.ToHexString(asset.Key).ToLowerInvariant()}",
+                        quantity: asset.Value
+                    ))
+                    .Where(x => UserTokenPrefixes.Values.Any(x.subject[(policyId.Length)..].StartsWith));
+            })
+            .GroupBy(x => x.subject)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.quantity));
 
-                    string assetNameHex = Convert.ToHexString(asset.Key).ToLowerInvariant();
-                    if (UserTokenPrefixes.Values.Any(assetNameHex.StartsWith))
-                    {
-                        string subject = $"{policyId}{assetNameHex}";
-                        mintedUserTokens[subject] = asset.Value;
-                    }
-                }
-            }
-        }
-
-        return mintedUserTokens;
-    }
-
-    private async Task<long> GetTokenQuantityAsync(string userTokenSubject, Dictionary<string, long> mintedUserTokens)
-    {
-        long quantity = mintedUserTokens.GetValueOrDefault(userTokenSubject, 0);
-        if (quantity > 0)
-            return quantity;
-
-        await using MetadataDbContext db = await dbContextFactory.CreateDbContextAsync();
-        TokenMetadataOnChain? existing = await db.TokenMetadataOnChain
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Subject == userTokenSubject);
-        return existing?.Quantity ?? 0;
-    }
-
-    private async Task<string?> DetermineUserTokenSubjectAsync(
-        string baseName,
-        string policyId,
-        Dictionary<string, long> mintedUserTokens)
-    {
-        foreach ((string _, string? prefix) in UserTokenPrefixes)
-        {
-            string subject = $"{policyId}{prefix}{baseName}";
-            if (mintedUserTokens.ContainsKey(subject))
-                return subject;
-        }
-
-        await using MetadataDbContext db = await dbContextFactory.CreateDbContextAsync();
-        foreach ((string _, string? prefix) in UserTokenPrefixes)
-        {
-            string subject = $"{policyId}{prefix}{baseName}";
-            bool exists = await db.TokenMetadataOnChain.AnyAsync(t => t.Subject == subject);
-            if (exists)
-                return subject;
-        }
-
-        return null;
-    }
-
-    private (string name, string image, string description, int? decimals) ExtractCIP68Metadata(byte[] datumBytes)
+    private static (string name, string image, string description, int? decimals) ExtractCIP68Metadata(byte[] datumBytes)
     {
         try
         {
             Cip68<PlutusData> datum = CborSerializer.Deserialize<Cip68<PlutusData>>(datumBytes);
-            if (datum?.Metadata == null)
-                return ("", "", "", null);
+            if (datum?.Metadata is not PlutusMap map)
+                return (string.Empty, string.Empty, string.Empty, null);
 
-            string? name = null, image = null, description = null;
-            int? decimals = null;
+            Dictionary<string, PlutusData> fields = map.PlutusData
+                .Where(kvp => kvp.Key is PlutusBoundedBytes)
+                .ToDictionary(
+                    kvp => System.Text.Encoding.UTF8.GetString(((PlutusBoundedBytes)kvp.Key).Value),
+                    kvp => kvp.Value);
 
-            if (datum.Metadata is PlutusMap map)
-            {
-                foreach (KeyValuePair<PlutusData, PlutusData> kvp in map.PlutusData)
+            string name = fields.TryGetValue("name", out PlutusData? n) && n is PlutusBoundedBytes nb
+                ? System.Text.Encoding.UTF8.GetString(nb.Value) : string.Empty;
+
+            string image = fields.TryGetValue("image", out PlutusData? i) && i is PlutusBoundedBytes ib
+                ? System.Text.Encoding.UTF8.GetString(ib.Value) : string.Empty;
+
+            string description = fields.TryGetValue("description", out PlutusData? d) && d is PlutusBoundedBytes db
+                ? System.Text.Encoding.UTF8.GetString(db.Value) : string.Empty;
+
+            int? decimals = fields.TryGetValue("decimals", out PlutusData? dec)
+                ? dec switch
                 {
-                    if (kvp.Key is PlutusBoundedBytes keyBytes)
-                    {
-                        string key = System.Text.Encoding.UTF8.GetString(keyBytes.Value);
-
-                        switch (key)
-                        {
-                            case "name":
-                                if (kvp.Value is PlutusBoundedBytes nameBytes)
-                                {
-                                    name = System.Text.Encoding.UTF8.GetString(nameBytes.Value);
-                                }
-                                break;
-                            case "image":
-                                if (kvp.Value is PlutusBoundedBytes imageBytes)
-                                {
-                                    image = System.Text.Encoding.UTF8.GetString(imageBytes.Value);
-                                }
-                                break;
-                            case "description":
-                                if (kvp.Value is PlutusBoundedBytes descBytes)
-                                {
-                                    description = System.Text.Encoding.UTF8.GetString(descBytes.Value);
-                                }
-                                break;
-                            case "decimals":
-                                if (kvp.Value is PlutusInt64 decInt)
-                                {
-                                    decimals = (int)decInt.Value;
-                                }
-                                else if (kvp.Value is PlutusUint64 decUint)
-                                {
-                                    decimals = (int)decUint.Value;
-                                }
-                                break;
-                        }
-                    }
+                    PlutusInt64 decInt => (int)decInt.Value,
+                    PlutusUint64 decUint => (int)decUint.Value,
+                    _ => null
                 }
-            }
-            return (name ?? "", image ?? "", description ?? "", decimals);
+                : null;
+
+            return (name, image, description, decimals);
         }
         catch
         {
-            return ("", "", "", null);
+            return (string.Empty, string.Empty, string.Empty, null);
         }
     }
 
@@ -318,47 +229,42 @@ public class CIP68Reducer(
         return ResolveDatumFromWitnessSet(datumHash, plutusDataSet);
     }
 
-    private static byte[]? ResolveDatumFromWitnessSet(byte[] datumHash, IEnumerable<PlutusData> plutusDataSet)
-    {
-        foreach (PlutusData plutusData in plutusDataSet)
-        {
-            byte[] datumBytes = plutusData.Raw();
-            byte[] calculatedHash = HashUtil.Blake2b256(datumBytes);
-
-            if (calculatedHash.SequenceEqual(datumHash))
-            {
-                return datumBytes;
-            }
-        }
-        return null;
-    }
+    private static byte[]? ResolveDatumFromWitnessSet(byte[] datumHash, IEnumerable<PlutusData> plutusDataSet) =>
+        plutusDataSet
+            .Select(pd => pd.Raw())
+            .FirstOrDefault(datumBytes => HashUtil.Blake2b256(datumBytes).SequenceEqual(datumHash));
 
     private async Task SaveTokensAsync(Dictionary<string, TokenMetadataOnChain> tokensToProcess)
     {
         await using MetadataDbContext db = await dbContextFactory.CreateDbContextAsync();
 
-        List<string> subjects = [.. tokensToProcess.Keys];
-        Dictionary<string, TokenMetadataOnChain> existingRecords = await db.TokenMetadataOnChain
-            .Where(t => subjects.Contains(t.Subject))
+        Dictionary<string, TokenMetadataOnChain> existingTokens = await db.TokenMetadataOnChain
+            .Where(t => tokensToProcess.Keys.Contains(t.Subject))
             .AsNoTracking()
             .ToDictionaryAsync(t => t.Subject);
 
-        foreach ((string? subject, TokenMetadataOnChain? tokenData) in tokensToProcess)
-        {
-            if (existingRecords.ContainsKey(subject))
-            {
-                db.TokenMetadataOnChain.Update(tokenData);
-                logger.LogInformation("Updated CIP-68 token {Subject} with quantity {Quantity}",
-                    subject, tokenData.Quantity);
-            }
-            else
-            {
-                db.TokenMetadataOnChain.Add(tokenData);
-                logger.LogInformation("Inserted CIP-68 token {Subject} with quantity {Quantity}",
-                    subject, tokenData.Quantity);
-            }
-        }
+        List<TokenMetadataOnChain> toInsert = tokensToProcess.Values
+            .Where(t => !existingTokens.ContainsKey(t.Subject))
+            .ToList();
+
+        List<TokenMetadataOnChain> toUpdate = tokensToProcess.Values
+            .Where(t => existingTokens.TryGetValue(t.Subject, out TokenMetadataOnChain? existing) && !TokensAreEqual(t, existing))
+            .ToList();
+
+        db.TokenMetadataOnChain.AddRange(toInsert);
+        db.TokenMetadataOnChain.UpdateRange(toUpdate);
+
+        toInsert.ForEach(t => logger.LogInformation("Inserted CIP-68 token {Subject} with quantity {Quantity}", t.Subject, t.Quantity));
+        toUpdate.ForEach(t => logger.LogInformation("Updated CIP-68 token {Subject} - quantity: {OldQty} -> {NewQty}",
+            t.Subject, existingTokens[t.Subject].Quantity, t.Quantity));
 
         await db.SaveChangesAsync();
     }
+
+    private static bool TokensAreEqual(TokenMetadataOnChain a, TokenMetadataOnChain b) =>
+        a.Name == b.Name &&
+        a.Logo == b.Logo &&
+        a.Description == b.Description &&
+        a.Quantity == b.Quantity &&
+        a.Decimals == b.Decimals;
 }

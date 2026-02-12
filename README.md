@@ -20,7 +20,7 @@
   </a>
   <br>
   <a href="https://dotnet.microsoft.com/download">
-    <img src="https://img.shields.io/badge/.NET-9.0-512BD4?style=flat-square" alt=".NET">
+    <img src="https://img.shields.io/badge/.NET-10.0-512BD4?style=flat-square" alt=".NET">
   </a>
   <a href="https://www.postgresql.org/">
     <img src="https://img.shields.io/badge/PostgreSQL-15+-336791?style=flat-square" alt="PostgreSQL">
@@ -32,7 +32,7 @@
 
 ## 📖 Overview
 
-The Cardano Open Metadata Project (COMP) is a unified metadata specification and high-performance reference implementation for the Cardano blockchain. COMP defines standardized REST APIs that aggregate all Cardano metadata types - tokens, NFTs, stake pools, and DReps - from multiple sources into a single, queryable interface. Built with modern .NET 9.0 and PostgreSQL, our reference implementation demonstrates sub-millisecond query performance while establishing COMP as the definitive metadata standard for the Cardano ecosystem.
+The Cardano Open Metadata Project (COMP) is a unified metadata specification and high-performance reference implementation for the Cardano blockchain. COMP defines standardized REST APIs that aggregate Cardano metadata from multiple sources into a single, queryable interface. Built with modern .NET 10.0 and PostgreSQL, the current implementation focuses on token registry and on-chain token metadata (CIP-25/CIP-68).
 
 **Key Features:**
 
@@ -82,7 +82,7 @@ graph LR
 
 ### Prerequisites
 
-- .NET 9.0 SDK
+- .NET 10.0 SDK
 - PostgreSQL 15+
 - GitHub Personal Access Token (for API rate limits)
 
@@ -112,18 +112,31 @@ cd COMP
 }
 ```
 
-3. **Run database migrations**
+3. **Start local dependencies (why `docker-compose.yml` is in repo root)**
+```bash
+docker compose up -d db
+```
+
+The root `docker-compose.yml` is used for local development orchestration. It starts the shared PostgreSQL service and the API container from the same repository context, so Docker can access `src/` and `infrastructure/` paths directly.
+
+4. **Run database migrations** (optional if running `COMP.Sync`, which applies migrations on startup)
 ```bash
 dotnet ef database update
 ```
 
-4. **Start the service**
+5. **Start the API service**
 ```bash
-dotnet run
+dotnet run --project src/COMP.API
 ```
 
-The service will start syncing with the GitHub Token Registry and expose APIs on:
-- `https://localhost:7276` (HTTPS) or `http://localhost:5146` (HTTP)
+6. **(Optional) Start the sync worker**
+```bash
+dotnet run --project src/COMP.Sync
+```
+
+API docs in development:
+- `http://localhost:5001/scalar`
+- `http://localhost:5001/openapi/v1.json`
 
 ## 📡 API Endpoints
 
@@ -268,7 +281,7 @@ COMP implementations must handle:
 Our reference implementation demonstrates the COMP specification using:
 
 ### Core Technologies
-- **.NET 9.0** - High-performance runtime with modern C# features
+- **.NET 10.0** - High-performance runtime with modern C# features
 - **PostgreSQL** - Scalable database for metadata storage
 - **FastEndpoints** - Lightweight API framework for REST endpoints
 
@@ -325,6 +338,14 @@ COMP implementations must include:
 - **Input Validation** - Sanitize and validate all user inputs
 - **Secrets Management** - Secure storage for credentials and keys
 - **CORS Policy** - Configure appropriate cross-origin policies
+
+## 🖼️ Image Upload Service Status
+
+Image upload/caching is implemented on the feature branch `feat/api/image-upload-service`.
+
+- Reference: `docs/IMAGE_UPLOAD_SERVICE.md`
+- Implementation branch: `feat/api/image-upload-service`
+- Mainline note: if this branch is not merged into your current checkout, image upload will not be active at runtime.
 
 ## 🤝 Contributing
 

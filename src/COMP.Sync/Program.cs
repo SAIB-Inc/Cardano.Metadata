@@ -3,7 +3,6 @@ using Argus.Sync.Data.Models;
 using Microsoft.EntityFrameworkCore;
 using COMP.Data.Data;
 using COMP.Sync.Services;
-using COMP.API.Modules.Handlers;
 using COMP.Sync.Reducers;
 using System.Net.Http.Headers;
 using System.Reflection;
@@ -15,7 +14,6 @@ builder.Services.AddCardanoIndexer<MetadataDbContext>(builder.Configuration);
 
 // Register reducers - the assembly scanning will find CIP25Reducer
 builder.Services.AddReducers<MetadataDbContext, IReducerModel>(builder.Configuration);
-builder.Services.AddSingleton<MetadataHandler>();
 builder.Services.AddSingleton<MetadataDbService>();
 builder.Services.AddSingleton<GithubService>();
 builder.Services.AddHostedService<GithubReducer>();

@@ -1,5 +1,5 @@
 using FastEndpoints;
-using COMP.API.Modules.Handlers;
+using COMP.API.Handlers;
 using COMP.Data.Models.Request;
 
 namespace COMP.API.Endpoints;
@@ -14,8 +14,7 @@ public class BatchTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpo
         AllowAnonymous();
         Description(b => b
             .WithName("BatchTokenMetadata")
-            .WithSummary("Retrieve token metadata for a batch of subjects")
-            .WithTags("Metadata"));
+            .WithSummary("Retrieve token metadata for a batch of subjects"));
     }
 
     public override async Task HandleAsync(BatchTokenMetadataRequest req, CancellationToken ct)
@@ -29,11 +28,9 @@ public class BatchTokenMetadataEndpoint(MetadataHandler metadataHandler) : Endpo
             req.Offset,
             req.IncludeEmptyName,
             req.IncludeEmptyLogo,
-            req.IncludeEmptyTicker);
-        
-        if (result is IResult httpResult)
-        {
-            await SendResultAsync(httpResult);
-        }
+            req.IncludeEmptyTicker,
+            ct);
+
+        await result.ExecuteAsync(HttpContext);
     }
 }

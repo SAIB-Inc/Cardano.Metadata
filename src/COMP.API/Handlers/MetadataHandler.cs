@@ -1,34 +1,32 @@
-using COMP.Data.Models.Entity;
-using Microsoft.EntityFrameworkCore;
-using LinqKit;
 using COMP.Data.Data;
+using COMP.Data.Models.Entity;
+using LinqKit;
+using Microsoft.EntityFrameworkCore;
 
-namespace COMP.API.Modules.Handlers;
+namespace COMP.API.Handlers;
 
-public class MetadataHandler
-(
-    IDbContextFactory<MetadataDbContext> _dbContextFactory
-)
+public class MetadataHandler(IDbContextFactory<MetadataDbContext> _dbContextFactory)
 {
     // Fetch data by subject (checks both registry and on-chain tables)
-    public async Task<IResult> GetTokenMetadataAsync(string subject)
+    public async Task<IResult> GetTokenMetadataAsync(string subject, CancellationToken cancellationToken = default)
     {
-        await using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync();
+        await using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         // Query both tables sequentially
-        TokenMetadata? registryToken = await db.TokenMetadata
+        TokenMetadataRegistry? registryToken = await db.TokenMetadataRegistry
             .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Subject == subject);
+            .FirstOrDefaultAsync(t => t.Subject == subject, cancellationToken);
 
         TokenMetadataOnChain? onChainToken = await db.TokenMetadataOnChain
             .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.Subject == subject);
+            .FirstOrDefaultAsync(t => t.Subject == subject, cancellationToken);
 
         // If both are null, return 404
         if (registryToken is null && onChainToken is null)
             return Results.NotFound();
 
         // Prioritize on-chain data, fall back to registry
+        string? logo = onChainToken?.Logo ?? registryToken?.Logo;
 
         return Results.Ok(new
         {
@@ -36,7 +34,7 @@ public class MetadataHandler
             policyId = onChainToken?.PolicyId ?? registryToken?.PolicyId ?? "",
             name = onChainToken?.Name ?? registryToken?.Name,
             ticker = registryToken?.Ticker,
-            logo = onChainToken?.Logo ?? registryToken?.Logo,
+            logo,
             description = onChainToken?.Description ?? registryToken?.Description,
             decimals = onChainToken?.Decimals ?? registryToken?.Decimals ?? 0,
             quantity = onChainToken?.Quantity,
@@ -59,7 +57,8 @@ public class MetadataHandler
         int? offset,
         bool? includeEmptyName,
         bool? includeEmptyLogo,
-        bool? includeEmptyTicker)
+        bool? includeEmptyTicker,
+        CancellationToken cancellationToken = default)
     {
         if (subjects == null || subjects.Count == 0)
             return Results.BadRequest("No subjects provided.");
@@ -72,15 +71,15 @@ public class MetadataHandler
         List<string> distinctSubjects = [.. subjects.Distinct()];
 
         // Build predicate for registry metadata
-        ExpressionStarter<TokenMetadata> registryPredicate = PredicateBuilder.New<TokenMetadata>(false);
+        ExpressionStarter<TokenMetadataRegistry> registryPredicate = PredicateBuilder.New<TokenMetadataRegistry>(false);
         registryPredicate = registryPredicate.Or(token => distinctSubjects.Contains(token.Subject));
 
-        if (!string.IsNullOrWhiteSpace(policyId))
-        {
-            string lowerPolicyId = policyId.ToLowerInvariant();
-            registryPredicate = registryPredicate.And(token =>
-                token.Subject.Substring(0, 56).Equals(lowerPolicyId, StringComparison.CurrentCultureIgnoreCase));
-        }
+        string? normalizedPolicyId = string.IsNullOrWhiteSpace(policyId)
+            ? null
+            : policyId.Trim().ToLowerInvariant();
+
+        if (!string.IsNullOrWhiteSpace(normalizedPolicyId))
+            registryPredicate = registryPredicate.And(token => token.Subject.StartsWith(normalizedPolicyId));
         if (requireName)
             registryPredicate = registryPredicate.And(token => !string.IsNullOrEmpty(token.Name));
 
@@ -105,9 +104,9 @@ public class MetadataHandler
         ExpressionStarter<TokenMetadataOnChain> onChainPredicate = PredicateBuilder.New<TokenMetadataOnChain>(false);
         onChainPredicate = onChainPredicate.Or(token => distinctSubjects.Contains(token.Subject));
 
-        if (!string.IsNullOrWhiteSpace(policyId))
+        if (!string.IsNullOrWhiteSpace(normalizedPolicyId))
         {
-            onChainPredicate = onChainPredicate.And(token => token.PolicyId == policyId);
+            onChainPredicate = onChainPredicate.And(token => token.PolicyId == normalizedPolicyId);
         }
         if (requireName)
             onChainPredicate = onChainPredicate.And(token => !string.IsNullOrEmpty(token.Name));
@@ -122,32 +121,36 @@ public class MetadataHandler
                 (token.Description != null && EF.Functions.ILike(token.Description, $"%{searchText}%")));
         }
 
-        await using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync();
+        await using MetadataDbContext db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        // Query both tables sequentially
-        List<TokenMetadata> registryTokens = await db.TokenMetadata
+        // Query both tables sequentially (DbContext is not thread-safe)
+        List<TokenMetadataRegistry> registryTokens = await db.TokenMetadataRegistry
             .AsNoTracking()
             .Where(registryPredicate)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         List<TokenMetadataOnChain> onChainTokens = await db.TokenMetadataOnChain
             .AsNoTracking()
             .Where(onChainPredicate)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
+
+        // Convert to dictionaries for O(1) lookups instead of O(n) FirstOrDefault
+        Dictionary<string, TokenMetadataRegistry> registryBySubject = registryTokens.ToDictionary(t => t.Subject);
+        Dictionary<string, TokenMetadataOnChain> onChainBySubject = onChainTokens.ToDictionary(t => t.Subject);
 
         // Merge results - prioritize on-chain, combine with registry
         var mergedResults = distinctSubjects
             .Select(subject =>
             {
-                TokenMetadata? registry = registryTokens.FirstOrDefault(t => t.Subject == subject);
-                TokenMetadataOnChain? onChain = onChainTokens.FirstOrDefault(t => t.Subject == subject);
+                registryBySubject.TryGetValue(subject, out TokenMetadataRegistry? registry);
+                onChainBySubject.TryGetValue(subject, out TokenMetadataOnChain? onChain);
 
                 if (registry is null && onChain is null)
                     return null;
 
                 return new
                 {
-                    subject = subject,
+                    subject,
                     policyId = onChain?.PolicyId ?? registry?.PolicyId ?? "",
                     name = onChain?.Name ?? registry?.Name,
                     ticker = registry?.Ticker,
@@ -164,15 +167,18 @@ public class MetadataHandler
                 };
             })
             .Where(t => t is not null)
+            .Select(t => t!)
             .ToList();
+
+        if (requireTicker)
+            mergedResults = [.. mergedResults.Where(t => !string.IsNullOrEmpty(t.ticker))];
 
         int total = mergedResults.Count;
 
-        // Apply pagination
+        // Apply pagination: offset always applies, limit is optional
+        mergedResults = [.. mergedResults.Skip(effectiveOffset)];
         if (limit.HasValue)
-        {
-            mergedResults = mergedResults.Skip(effectiveOffset).Take(limit.Value).ToList();
-        }
+            mergedResults = [.. mergedResults.Take(limit.Value)];
 
         if (mergedResults.Count == 0)
             return Results.NotFound("No tokens found for the given subjects.");

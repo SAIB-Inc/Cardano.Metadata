@@ -1,6 +1,6 @@
 namespace COMP.Data.Models.Entity;
 
-public record SyncState(
+public record RegistrySyncState(
     string Hash,
     DateTimeOffset Date
 );

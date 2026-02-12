@@ -18,7 +18,7 @@ COPY infrastructure/comp-api/production-config.json ./COMP.API/appsettings.json
 RUN dotnet publish COMP.API/COMP.API.csproj -c Release -o /app/publish
 
 # Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:9.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 
 # Copy published app

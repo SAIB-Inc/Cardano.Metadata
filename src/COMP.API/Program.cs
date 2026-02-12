@@ -3,7 +3,7 @@ using FastEndpoints.Swagger;
 using Scalar.AspNetCore;
 using Microsoft.EntityFrameworkCore;
 using COMP.Data.Data;
-using COMP.API.Modules.Handlers;
+using COMP.API.Handlers;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -11,38 +11,25 @@ builder.Services.AddDbContextFactory<MetadataDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddSingleton<MetadataHandler>();
-
 builder.Services.AddFastEndpoints();
-builder.Services.SwaggerDocument(o =>
-{
-    o.DocumentSettings = s =>
-    {
-        s.Title = "COMP API";
-        s.Version = "v1";
-    };
-});
-
-builder.Services.AddOpenApi();
+builder.Services.SwaggerDocument();
 
 WebApplication app = builder.Build();
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
-app.UseHttpsRedirection();
-
 app.UseFastEndpoints();
 
-app.UseSwaggerGen();
-
-app.MapScalarApiReference(options =>
-    options
-        .WithTitle("COMP API")
-        .WithTheme(ScalarTheme.Purple)
-        .WithDefaultHttpClient(ScalarTarget.CSharp, ScalarClient.HttpClient)
-        .WithOpenApiRoutePattern("/swagger/{documentName}/swagger.json")
-);
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwaggerGen(options =>
+    {
+        options.Path = "/openapi/{documentName}.json";
+    });
+    app.MapScalarApiReference(options =>
+    {
+        options.Title = "COMP API Documentation";
+        options.Theme = ScalarTheme.Default;
+        options.ShowSidebar = true;
+    });
+}
 
 app.Run();
