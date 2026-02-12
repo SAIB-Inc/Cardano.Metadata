@@ -79,11 +79,7 @@ public class MetadataHandler(IDbContextFactory<MetadataDbContext> _dbContextFact
             : policyId.Trim().ToLowerInvariant();
 
         if (!string.IsNullOrWhiteSpace(normalizedPolicyId))
-        {
-            registryPredicate = registryPredicate.And(token =>
-                token.Subject.Length >= 56 &&
-                token.Subject.Substring(0, 56).Equals(normalizedPolicyId, StringComparison.CurrentCultureIgnoreCase));
-        }
+            registryPredicate = registryPredicate.And(token => token.Subject.StartsWith(normalizedPolicyId));
         if (requireName)
             registryPredicate = registryPredicate.And(token => !string.IsNullOrEmpty(token.Name));
 
@@ -171,15 +167,18 @@ public class MetadataHandler(IDbContextFactory<MetadataDbContext> _dbContextFact
                 };
             })
             .Where(t => t is not null)
+            .Select(t => t!)
             .ToList();
+
+        if (requireTicker)
+            mergedResults = [.. mergedResults.Where(t => !string.IsNullOrEmpty(t.ticker))];
 
         int total = mergedResults.Count;
 
-        // Apply pagination
+        // Apply pagination: offset always applies, limit is optional
+        mergedResults = [.. mergedResults.Skip(effectiveOffset)];
         if (limit.HasValue)
-        {
-            mergedResults = mergedResults.Skip(effectiveOffset).Take(limit.Value).ToList();
-        }
+            mergedResults = [.. mergedResults.Take(limit.Value)];
 
         if (mergedResults.Count == 0)
             return Results.NotFound("No tokens found for the given subjects.");
